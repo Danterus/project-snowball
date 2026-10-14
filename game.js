@@ -1391,21 +1391,126 @@ class SnowballGame {
   // ==========================================================================
   executeBotTurn() {
     const bot = this.players[this.currentPlayerIndex];
-    if (bot.eliminated) {
+    if (!bot || bot.eliminated) {
       this.nextPlayer();
       return;
     }
 
     // Находим живых соперников
     const opponents = this.players.filter((p) => p.id !== bot.id && !p.eliminated);
-    if (opponents.length === 0) return;
+    if (opponents.length === 0) {
+      this.checkVictoryCondition();
+      return;
+    }
 
     // Сортируем противников по расстоянию
     opponents.sort((a, b) => HexMath.distance(bot, a) - HexMath.distance(bot, b));
     const nearest = opponents[0];
-    const initialDist = HexMath.distance(bot, nearest);
+    const initialDist = nearest ? HexMath.distance(bot, nearest) : 999;
 
-    if (this.movePointsLeft > 0) {
+    const proceedWithAction = () => {
+      setTimeout(() => {
+        // Проверяем, жив ли еще бот и принадлежит ли ему ход
+        if (bot.eliminated || this.currentPlayerIndex !== bot.id) return;
+
+        // Если соперников нет — завершаем ход
+        const currentOpponents = this.players.filter((p) => p.id !== bot.id && !p.eliminated);
+        if (currentOpponents.length === 0) {
+          this.endTurn();
+          return;
+        }
+
+        // Если в руке нет снежков, либо в руке меньше 4 снежков и бот решает долепить:
+        if (bot.hand.length === 0) {
+          sounds.playSnowballGather();
+          const card = this.getRandomSnowballCard();
+          bot.hand.push(card);
+          this.logCombat(`${bot.name} слепил снежок: "${card.name}" ${card.art}`, 'gather');
+
+          if (this.gameType === 'multiplayer') {
+            network.sendNetworkAction({
+              type: 'NET_PLAYER_GATHER',
+              playerId: bot.id
+            });
+          }
+
+          this.endTurn();
+          return;
+        }
+
+        // Ищем наилучшую цель для броска снежка:
+        // Перебираем всех живых соперников и оцениваем шанс попадания
+        currentOpponents.sort((a, b) => HexMath.distance(bot, a) - HexMath.distance(bot, b));
+
+        // Выбираем лучший готовый снежок из руки (или первый)
+        const readyCard = bot.hand[0];
+        let bestTarget = null;
+        let bestScore = 999;
+
+        for (const opp of currentOpponents) {
+          const calc = this.calculateNeededRoll(bot, opp, readyCard);
+          // Чем меньше нужно выбросить на кубике, тем цель выгоднее
+          if (calc.neededScore < bestScore) {
+            bestScore = calc.neededScore;
+            bestTarget = opp;
+          }
+        }
+
+        // Если есть цель и шанс попадания не безнадежный (требуется 6 или меньше, либо если это единственный вариант)
+        if (bestTarget) {
+          // Если снежок требует больше 6+ (попасть невозможно даже на 6 с кубика) и в руке мало снежков (< 4) — бот предпочитает слепить еще снежок!
+          const impossibleHit = (bestScore - (readyCard.rangeMod || 0)) > 6;
+          if (impossibleHit && bot.hand.length < 4) {
+            sounds.playSnowballGather();
+            const card = this.getRandomSnowballCard();
+            bot.hand.push(card);
+            this.logCombat(`${bot.name} решил не рисковать и слепил свежий снежок: "${card.name}" ${card.art}`, 'gather');
+
+            if (this.gameType === 'multiplayer') {
+              network.sendNetworkAction({
+                type: 'NET_PLAYER_GATHER',
+                playerId: bot.id
+              });
+            }
+
+            this.endTurn();
+            return;
+          }
+
+          // Выполняем бросок снежка в выбранную цель!
+          this.selectedSnowballIndex = 0;
+          const targetPlayer = bestTarget;
+          const card = bot.hand[0];
+
+          // Тратим карту из руки бота
+          bot.hand = bot.hand.filter((_, idx) => idx !== 0);
+          this.selectedSnowballIndex = null;
+          this.updateHandDisplay();
+
+          sounds.playSnowballThrow();
+          this.spawnFlyingSnowball(bot, targetPlayer, () => {
+            this.executeDiceThrow(bot, targetPlayer, card, HexMath.distance(bot, targetPlayer), this.getEffectiveAimRange(bot));
+          });
+        } else {
+          // Если цели нет — лепим снежок или завершаем ход
+          if (bot.hand.length < 4) {
+            sounds.playSnowballGather();
+            const card = this.getRandomSnowballCard();
+            bot.hand.push(card);
+            this.logCombat(`${bot.name} слепил снежок: "${card.name}" ${card.art}`, 'gather');
+            if (this.gameType === 'multiplayer') {
+              network.sendNetworkAction({
+                type: 'NET_PLAYER_GATHER',
+                playerId: bot.id
+              });
+            }
+          }
+          this.endTurn();
+        }
+      }, 600);
+    };
+
+    if (this.movePointsLeft > 0 && nearest) {
       const bestMove = this.findBestBotMoveTile(bot, nearest, initialDist);
       if (bestMove && (bestMove.q !== bot.q || bestMove.r !== bot.r)) {
         if (this.gameType === 'multiplayer') {
