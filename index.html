@@ -114,6 +114,11 @@
         </div>
 
         <div class="modal-body lobby-body">
+          <div class="user-nickname-group" style="margin-bottom: 14px;">
+            <label for="inputPlayerNickname" style="font-weight: 700; color: var(--accent-frost); display: block; margin-bottom: 6px;">👤 Ваше имя во дворе:</label>
+            <input type="text" id="inputPlayerNickname" value="Игрок" maxlength="16" style="width: 100%; padding: 10px 14px; border-radius: 10px; background: rgba(0,0,0,0.3); border: 1px solid var(--panel-border); color: #fff; font-size: 1rem; font-weight: 700;">
+          </div>
+
           <div class="room-setup-tabs">
             <button class="tab-btn active" id="tabCreateRoom">Создать новую комнату</button>
             <button class="tab-btn" id="tabJoinRoom">Присоединиться по коду</button>
@@ -160,6 +165,9 @@
           <div class="lobby-actions">
             <button id="btnStartMultiplayerGame" class="btn btn-primary btn-large">
               🚀 Начать битву снежками!
+            </button>
+            <button id="btnClientToggleReady" class="btn btn-primary btn-large" style="display: none;">
+              ⏳ Нажмите "Я готов!"
             </button>
             <button id="btnCancelMultiplayer" class="btn btn-outline">
               Назад в меню

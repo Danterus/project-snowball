@@ -1,22 +1,30 @@
 // ==========================================================================
 // Project Snowball - Мультиплеерный модуль (WebRTC P2P через бесплатный PeerJS)
-// Позволяет играть между разными компьютерами, телефонами и вкладками без своего сервера!
+// Полноценный обмен состоянием лобби, готовностью, синхронизацией слотов и имен!
 // ==========================================================================
 
 class MultiplayerManager {
   constructor() {
     this.peer = null;
-    this.connections = []; // Активные P2P соединения
+    this.connections = []; // Активные P2P соединения у хоста
     this.hostConnection = null; // Для гостя: соединение с хостом
     this.roomCode = null;
     this.isHost = false;
     this.myPlayerId = null;
+    this.mySlotIndex = 0;
+    this.isReady = false;
+    this.playerName = 'Игрок';
+
     this.onMessageCallback = null;
-    this.onPlayerJoinedCallback = null;
-    this.connectedPeers = new Map(); // peerId -> { slotIndex, name }
+    this.onRoomStateUpdateCallback = null;
+
+    // Состояние комнаты (синхронизируется хостом)
+    this.roomState = {
+      playerCount: 3,
+      slots: []
+    };
   }
 
-  // Генерация компактного кода комнаты
   generateRoomCode() {
     const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
     let code = 'SNOW-';
@@ -26,131 +34,239 @@ class MultiplayerManager {
     return code;
   }
 
-  // Инициализация хоста: Peer ID привязывается к коду комнаты
-  createRoom(code, onReady, onPlayerJoin) {
+  // Хост создает комнату
+  createRoom(code, hostName, onReady) {
     this.roomCode = code.toUpperCase().trim();
     this.isHost = true;
-    this.onPlayerJoinedCallback = onPlayerJoin;
+    this.mySlotIndex = 0;
+    this.isReady = true; // Хост всегда готов
+    this.playerName = hostName || 'Хост';
 
-    // Префикс для уникальности на публичном сервере PeerJS
     const peerId = `snowball_room_${this.roomCode.replace('-', '_').toLowerCase()}`;
     this.myPlayerId = peerId;
 
+    // Инициализируем слоты комнаты
+    this.roomState = {
+      playerCount: this.roomState.playerCount || 3,
+      slots: [
+        { slot: 0, name: this.playerName, isHost: true, isReady: true, isConnected: true, peerId }
+      ]
+    };
+    this.fillEmptySlots();
+
     if (this.peer) this.peer.destroy();
 
-    // Подключаемся к бесплатному публичному PeerJS Cloud
-    this.peer = new Peer(peerId, {
-      debug: 1
-    });
+    this.peer = new Peer(peerId, { debug: 1 });
 
     this.peer.on('open', (id) => {
-      console.log('Хост комнаты открыт, Peer ID:', id);
+      console.log('Хост комнаты открыт:', id);
       if (onReady) onReady(this.roomCode);
+      if (this.onRoomStateUpdateCallback) {
+        this.onRoomStateUpdateCallback(this.roomState);
+      }
     });
 
     this.peer.on('connection', (conn) => {
-      console.log('Новое входящее подключение игрока:', conn.peer);
       this.setupHostConnection(conn);
     });
 
     this.peer.on('error', (err) => {
       console.warn('Peer error (хост):', err);
       if (err.type === 'unavailable-id') {
-        // Если ID занят, генерируем новый код
         const newCode = this.generateRoomCode();
-        this.createRoom(newCode, onReady, onPlayerJoin);
+        this.createRoom(newCode, hostName, onReady);
       }
     });
+  }
+
+  fillEmptySlots() {
+    // Заполняем остальные слоты
+    for (let i = 1; i < this.roomState.playerCount; i++) {
+      if (!this.roomState.slots[i]) {
+        this.roomState.slots[i] = {
+          slot: i,
+          name: `Игрок ${i + 1}`,
+          isHost: false,
+          isReady: false,
+          isConnected: false,
+          peerId: null
+        };
+      }
+    }
+    // Обрезаем, если уменьшили количество слотов
+    this.roomState.slots = this.roomState.slots.slice(0, this.roomState.playerCount);
+  }
+
+  // Хост меняет количество игроков
+  setPlayerCount(count) {
+    if (!this.isHost) return;
+    this.roomState.playerCount = count;
+    this.fillEmptySlots();
+    this.syncRoomState();
   }
 
   setupHostConnection(conn) {
     conn.on('open', () => {
+      // Ищем свободный слот для игрока
+      let freeSlot = this.roomState.slots.findIndex(s => !s.isConnected && !s.isHost);
+      if (freeSlot === -1 && this.roomState.slots.length < this.roomState.playerCount) {
+        freeSlot = this.roomState.slots.length;
+      }
+
+      if (freeSlot === -1) {
+        conn.send({ type: 'ROOM_FULL' });
+        conn.close();
+        return;
+      }
+
+      conn.slotIndex = freeSlot;
       this.connections.push(conn);
 
-      // Отправляем новому игроку подтверждение входа
+      this.roomState.slots[freeSlot] = {
+        slot: freeSlot,
+        name: `Игрок ${freeSlot + 1}`,
+        isHost: false,
+        isReady: false,
+        isConnected: true,
+        peerId: conn.peer
+      };
+
+      // Отправляем игроку его слот и актуальное состояние лобби
       conn.send({
-        type: 'WELCOME_PLAYER',
-        roomCode: this.roomCode,
-        assignedSlot: this.connections.length // слот 1, 2, ...
+        type: 'ROOM_STATE_SYNC',
+        roomState: this.roomState,
+        assignedSlot: freeSlot
       });
 
-      if (this.onPlayerJoinedCallback) {
-        this.onPlayerJoinedCallback({
-          peerId: conn.peer,
-          slot: this.connections.length
-        });
-      }
+      this.syncRoomState();
     });
 
     conn.on('data', (data) => {
-      this.handleIncomingData(data);
-      // Хост ретранслирует полученное действие всем остальным игрокам
-      this.broadcastFromHost(data, conn);
+      this.handleHostReceivedData(data, conn);
     });
 
     conn.on('close', () => {
       this.connections = this.connections.filter(c => c !== conn);
-      console.log('Игрок отключился:', conn.peer);
+      if (conn.slotIndex !== undefined && this.roomState.slots[conn.slotIndex]) {
+        this.roomState.slots[conn.slotIndex].isConnected = false;
+        this.roomState.slots[conn.slotIndex].isReady = false;
+        this.syncRoomState();
+      }
     });
   }
 
-  // Подключение гостя к созданной комнате
-  joinRoom(code, onConnected, onError) {
+  // Клиент подключается к комнате
+  joinRoom(code, clientName, onConnected, onError) {
     this.roomCode = code.toUpperCase().trim();
     this.isHost = false;
+    this.isReady = false;
+    this.playerName = clientName || 'Гость';
 
     if (this.peer) this.peer.destroy();
 
-    this.peer = new Peer({
-      debug: 1
-    });
+    this.peer = new Peer({ debug: 1 });
 
     this.peer.on('open', (myId) => {
       this.myPlayerId = myId;
       const targetHostPeerId = `snowball_room_${this.roomCode.replace('-', '_').toLowerCase()}`;
-      console.log('Подключаемся к хосту комнаты:', targetHostPeerId);
 
-      const conn = this.peer.connect(targetHostPeerId, {
-        reliable: true
-      });
+      const conn = this.peer.connect(targetHostPeerId, { reliable: true });
 
       conn.on('open', () => {
         this.hostConnection = conn;
-        console.log('Успешно подключились к хосту комнаты!');
+        // Отправляем хосту инфо о себе (имя)
+        conn.send({
+          type: 'CLIENT_HELLO',
+          name: this.playerName
+        });
         if (onConnected) onConnected(this.roomCode);
       });
 
       conn.on('data', (data) => {
-        this.handleIncomingData(data);
+        this.handleClientReceivedData(data);
       });
 
       conn.on('error', (err) => {
-        console.error('Ошибка соединения с хостом:', err);
         if (onError) onError(err);
       });
     });
 
     this.peer.on('error', (err) => {
-      console.error('Peer error (клиент):', err);
       if (onError) onError(err);
     });
   }
 
-  // Отправка сообщения по сети
-  sendNetworkAction(payload) {
-    const data = {
-      ...payload,
-      roomCode: this.roomCode,
-      senderId: this.myPlayerId,
-      timestamp: Date.now()
-    };
+  // Обработка данных хостом
+  handleHostReceivedData(data, conn) {
+    if (!data) return;
 
-    if (this.isHost) {
-      // Хост рассылает всем подключенным клиентам
-      this.broadcastFromHost(data);
-    } else if (this.hostConnection && this.hostConnection.open) {
-      // Клиент отправляет хосту
-      this.hostConnection.send(data);
+    if (data.type === 'CLIENT_HELLO') {
+      const slot = conn.slotIndex;
+      if (slot !== undefined && this.roomState.slots[slot]) {
+        this.roomState.slots[slot].name = data.name || `Игрок ${slot + 1}`;
+        this.syncRoomState();
+      }
+    } else if (data.type === 'CLIENT_READY_TOGGLE') {
+      const slot = conn.slotIndex;
+      if (slot !== undefined && this.roomState.slots[slot]) {
+        this.roomState.slots[slot].isReady = data.isReady;
+        this.syncRoomState();
+      }
+    } else {
+      // Игровое действие — транслируем
+      if (this.onMessageCallback) this.onMessageCallback(data);
+      this.broadcastFromHost(data, conn);
+    }
+  }
+
+  // Обработка данных клиентом
+  handleClientReceivedData(data) {
+    if (!data) return;
+
+    if (data.type === 'ROOM_STATE_SYNC') {
+      this.roomState = data.roomState;
+      if (data.assignedSlot !== undefined) {
+        this.mySlotIndex = data.assignedSlot;
+      }
+      if (this.onRoomStateUpdateCallback) {
+        this.onRoomStateUpdateCallback(this.roomState);
+      }
+    } else if (data.type === 'GAME_START') {
+      if (this.onMessageCallback) this.onMessageCallback(data);
+    } else {
+      if (this.onMessageCallback) this.onMessageCallback(data);
+    }
+  }
+
+  // Переключение статуса готовности клиентом
+  toggleReady() {
+    this.isReady = !this.isReady;
+    if (!this.isHost && this.hostConnection && this.hostConnection.open) {
+      this.hostConnection.send({
+        type: 'CLIENT_READY_TOGGLE',
+        isReady: this.isReady
+      });
+    }
+    return this.isReady;
+  }
+
+  // Проверка: все ли подключенные клиенты нажали готовность?
+  areAllClientsReady() {
+    // Проверяем всех, кто подключен (кроме хоста, хост по умолчанию готов)
+    const connectedClients = this.roomState.slots.filter(s => s.isConnected && !s.isHost);
+    if (connectedClients.length === 0) return true; // Если только хост и боты
+    return connectedClients.every(s => s.isReady);
+  }
+
+  // Хост рассылает состояние комнаты всем
+  syncRoomState() {
+    if (!this.isHost) return;
+    this.broadcastFromHost({
+      type: 'ROOM_STATE_SYNC',
+      roomState: this.roomState
+    });
+    if (this.onRoomStateUpdateCallback) {
+      this.onRoomStateUpdateCallback(this.roomState);
     }
   }
 
@@ -162,11 +278,8 @@ class MultiplayerManager {
     });
   }
 
-  handleIncomingData(data) {
-    if (!data) return;
-    if (this.onMessageCallback) {
-      this.onMessageCallback(data);
-    }
+  onRoomStateUpdate(callback) {
+    this.onRoomStateUpdateCallback = callback;
   }
 
   onMessage(callback) {

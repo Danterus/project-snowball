@@ -179,11 +179,67 @@ class SnowballGame {
       alert(`Код комнаты "${code}" скопирован в буфер обмена!`);
     });
 
+    // Переключение количества игроков в лобби мультиплеера
+    document.querySelectorAll('.player-count-buttons .btn-chip').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        sounds.playClick();
+        if (!network.isHost) {
+          alert('Только создатель комнаты (хост) может изменять количество игроков!');
+          return;
+        }
+        document.querySelectorAll('.player-count-buttons .btn-chip').forEach(b => b.classList.remove('active'));
+        e.target.classList.add('active');
+        const count = parseInt(e.target.dataset.count);
+        this.playerCount = count;
+        network.setPlayerCount(count);
+      });
+    });
+
+    // Изменение ника
+    const inputNick = document.getElementById('inputPlayerNickname');
+    if (inputNick) {
+      inputNick.addEventListener('input', (e) => {
+        network.playerName = e.target.value.trim() || 'Игрок';
+      });
+    }
+
+    // Подписка на обновление состояния лобби от MultiplayerManager
+    network.onRoomStateUpdate((roomState) => {
+      this.renderLobbySlots(roomState);
+    });
+
     document.getElementById('btnStartMultiplayerGame').addEventListener('click', () => {
       sounds.playClick();
+      if (!network.isHost) return;
+
+      // Проверка готовности всех подключенных клиентов
+      if (!network.areAllClientsReady()) {
+        alert('Не все игроки готовы! Дождитесь, пока каждый участник нажмет кнопку "Я готов!".');
+        return;
+      }
+
       this.gameType = 'multiplayer';
+      this.playerCount = network.roomState.playerCount;
+
+      // Хост отправляет команду старта игры
+      network.sendNetworkAction({
+        type: 'GAME_START',
+        playerCount: this.playerCount
+      });
+
       this.openCharacterSelect();
     });
+
+    // Кнопка Готовности для клиента
+    const btnClientReady = document.getElementById('btnClientToggleReady');
+    if (btnClientReady) {
+      btnClientReady.addEventListener('click', () => {
+        sounds.playClick();
+        const isReady = network.toggleReady();
+        btnClientReady.textContent = isReady ? '✅ Вы готовы! (Ожидание хоста)' : '⏳ Нажмите "Я готов!"';
+        btnClientReady.classList.toggle('ready-active', isReady);
+      });
+    }
 
     document.getElementById('btnConnectRoom').addEventListener('click', () => {
       sounds.playClick();
@@ -194,18 +250,34 @@ class SnowballGame {
         return;
       }
 
+      const nickInput = document.getElementById('inputPlayerNickname');
+      const myName = (nickInput ? nickInput.value.trim() : '') || 'Игрок ' + Math.floor(Math.random() * 100);
+
       const btnConnect = document.getElementById('btnConnectRoom');
-      btnConnect.textContent = 'Подключение...';
+      btnConnect.textContent = 'Подключение по интернету...';
       btnConnect.disabled = true;
 
-      network.joinRoom(code, (roomCode) => {
-        btnConnect.textContent = 'Подключено! Ожидание хоста...';
-        alert(`Вы успешно подключились к комнате ${roomCode}! Ожидайте старта от хоста.`);
+      network.joinRoom(code, myName, (roomCode) => {
+        btnConnect.textContent = 'Подключено к комнате!';
+        // Переключаем интерфейс клиента: скрываем кнопку старта хоста, показываем кнопку Готовности
+        document.getElementById('btnStartMultiplayerGame').style.display = 'none';
+        const readyBtn = document.getElementById('btnClientToggleReady');
+        if (readyBtn) readyBtn.style.display = 'inline-block';
+        alert(`Вы успешно вошли в комнату ${roomCode}! Нажмите "Я готов!", когда будете готовы.`);
       }, (err) => {
         btnConnect.textContent = 'Подключиться к комнате';
         btnConnect.disabled = false;
-        alert(`Не удалось подключиться к комнате "${code}". Проверьте код комнаты.`);
+        alert(`Не удалось подключиться к комнате "${code}". Проверьте код и интернет.`);
       });
+    });
+
+    // Слушатель игровых сетевых событий (GAME_START и т.д.)
+    network.onMessage((msg) => {
+      if (msg.type === 'GAME_START') {
+        this.gameType = 'multiplayer';
+        this.playerCount = msg.playerCount || 3;
+        this.openCharacterSelect();
+      }
     });
 
     // Экран выбора персонажей
@@ -313,37 +385,65 @@ class SnowballGame {
     const code = network.generateRoomCode();
     document.getElementById('generatedRoomCode').textContent = code;
 
-    const slots = document.getElementById('slotsContainer');
-    slots.innerHTML = `
-      <div class="lobby-slot-item">
-        <span>👑 Игрок 1 (Вы - Создатель комнаты)</span>
-        <span style="color:#69f0ae; font-weight:800;">Готов</span>
-      </div>
-      <div class="lobby-slot-item" id="slotStatus2">
-        <span>👤 Игрок 2 (Ожидание подключения через интернет...)</span>
-        <span style="color:#ffd54f;">Ожидание</span>
-      </div>
-      <div class="lobby-slot-item" id="slotStatus3">
-        <span>👤 Игрок 3 (Ожидание подключения через интернет...)</span>
-        <span style="color:#ffd54f;">Ожидание</span>
-      </div>
-    `;
+    const nickInput = document.getElementById('inputPlayerNickname');
+    const myName = (nickInput ? nickInput.value.trim() : '') || 'Создатель';
 
-    network.createRoom(code, (readyCode) => {
-      console.log('Комната создана и ждет подключения:', readyCode);
-    }, (playerInfo) => {
-      // Игрок подключился по WebRTC через интернет
-      sounds.playClick();
-      const slotEl = document.getElementById(`slotStatus${playerInfo.slot + 1}`);
-      if (slotEl) {
-        slotEl.innerHTML = `
-          <span>👤 Игрок ${playerInfo.slot + 1} (Подключен!)</span>
-          <span style="color:#69f0ae; font-weight:800;">Подключен</span>
-        `;
-      }
+    // Для хоста показываем кнопку "Начать", скрываем клиентскую кнопку готовности
+    document.getElementById('btnStartMultiplayerGame').style.display = 'inline-block';
+    const readyBtn = document.getElementById('btnClientToggleReady');
+    if (readyBtn) readyBtn.style.display = 'none';
+
+    // Создаем комнату с регистрацией хоста
+    network.createRoom(code, myName, (readyCode) => {
+      console.log('Комната создана хостом:', readyCode);
     });
 
     this.switchScreen('multiplayerLobbyScreen');
+  }
+
+  // Отрисовка участников и их готовности в лобби
+  renderLobbySlots(roomState) {
+    const slotsContainer = document.getElementById('slotsContainer');
+    if (!slotsContainer || !roomState) return;
+
+    // Синхронизируем кнопки количества игроков
+    document.querySelectorAll('.player-count-buttons .btn-chip').forEach(btn => {
+      const count = parseInt(btn.dataset.count);
+      btn.classList.toggle('active', count === roomState.playerCount);
+    });
+
+    slotsContainer.innerHTML = '';
+
+    for (let i = 0; i < roomState.playerCount; i++) {
+      const slotData = roomState.slots[i] || {
+        slot: i,
+        name: `Игрок ${i + 1}`,
+        isHost: i === 0,
+        isReady: false,
+        isConnected: false
+      };
+
+      const item = document.createElement('div');
+      item.className = 'lobby-slot-item';
+
+      let statusHtml = '';
+      if (slotData.isHost) {
+        statusHtml = `<span style="color:#69f0ae; font-weight:800;">👑 Создатель (Готов)</span>`;
+      } else if (!slotData.isConnected) {
+        statusHtml = `<span style="color:#ffd54f;">Ожидание игрока...</span>`;
+      } else if (slotData.isReady) {
+        statusHtml = `<span style="color:#69f0ae; font-weight:800;">✅ Готов к бою</span>`;
+      } else {
+        statusHtml = `<span style="color:#ffb74d; font-weight:800;">⏳ Выбирает снаряжение</span>`;
+      }
+
+      item.innerHTML = `
+        <span>${slotData.isHost ? '👑' : '👤'} <strong>${slotData.name}</strong></span>
+        ${statusHtml}
+      `;
+
+      slotsContainer.appendChild(item);
+    }
   }
 
   // ==========================================================================
