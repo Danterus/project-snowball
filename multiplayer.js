@@ -280,8 +280,10 @@ class MultiplayerManager {
     };
 
     if (this.isHost) {
+      // Хост рассылает всем клиентам
       this.broadcastFromHost(data);
     } else if (this.hostConnection && this.hostConnection.open) {
+      // Клиент отправляет хосту (а хост перешлет другим)
       this.hostConnection.send(data);
     }
   }

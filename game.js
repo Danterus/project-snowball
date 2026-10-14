@@ -289,8 +289,49 @@ class SnowballGame {
           }
         }
       } else if (msg.type === 'START_BATTLE_SYNC') {
-        this.startBattle(false);
+        this.startBattle(false, msg.mapSeed);
+      } else if (msg.type === 'NET_PLAYER_MOVE') {
+        // Синхронное перемещение персонажа на гекс
+        const p = this.players[msg.playerId];
+        if (p) {
+          this.logCombat(`${p.name} перемещается на (${msg.targetQ}, ${msg.targetR})...`, 'move');
+          this.animatePlayerMove(p, msg.targetQ, msg.targetR, 500);
+        }
+      } else if (msg.type === 'NET_PLAYER_GATHER') {
+        const p = this.players[msg.playerId];
+        if (p) {
+          sounds.playSnowballGather();
+          this.logCombat(`${p.name} слепил снежок!`, 'gather');
+        }
+    } else if (msg.type === 'NET_PLAYER_THROW') {
+      const attacker = this.players[msg.attackerId];
+      const target = this.players[msg.targetId];
+      if (attacker && target) {
+        sounds.playSnowballThrow();
+        this.spawnFlyingSnowball(attacker, target, () => {
+          this.showDiceAnimation(msg.rawRoll, msg.diceBonus, msg.finalRoll, msg.neededScore, msg.aim, msg.dist, () => {
+            if (msg.isHit) {
+              sounds.playHit();
+              target.hp -= msg.totalDamage;
+              this.logCombat(`ПОПАДАНИЕ! ${attacker.name} попал в ${target.name} на ${msg.totalDamage} урона!`, 'damage');
+              if (target.hp <= 0) {
+                target.hp = 0;
+                target.eliminated = true;
+                this.logCombat(`😵 ${target.name} сбит с ног в сугроб и выбывает!`, 'damage');
+              }
+            } else {
+              sounds.playMiss();
+              this.logCombat(`МИМО! ${attacker.name} промахнулся по ${target.name}.`, 'system');
+            }
+            this.updateStatusSidebar();
+            this.checkVictoryCondition();
+          });
+        });
       }
+    } else if (msg.type === 'NET_END_TURN') {
+      this.turnPhase = 'ended';
+      this.nextPlayer();
+    }
     });
 
     // Экран выбора персонажей
@@ -707,9 +748,20 @@ class SnowballGame {
   // ==========================================================================
   // СТАРТ БИТВЫ И РАССТАНОВКА НА КАРТЕ
   // ==========================================================================
-  startBattle(isSyncInitiator = true) {
+  startBattle(isSyncInitiator = true, syncedSeed = null) {
     clearInterval(this.charSelectTimerInterval);
-    this.map = MapGenerator.generateMap();
+
+    // В мультиплеере хост генерирует seed и синхронизирует одинаковую карту у всех
+    let mapSeed = syncedSeed;
+    if (this.gameType === 'multiplayer' && isSyncInitiator) {
+      mapSeed = Math.floor(Math.random() * 1000000);
+      network.sendNetworkAction({
+        type: 'START_BATTLE_SYNC',
+        mapSeed
+      });
+    }
+
+    this.map = MapGenerator.generateMap(mapSeed);
 
     // 2. Инициализируем игроков
     this.players = [];
@@ -732,6 +784,7 @@ class SnowballGame {
         art: char.art,
         color: char.color,
         isBot: slot.isBot,
+        isRemotePlayer: this.gameType === 'multiplayer' && (i !== network.mySlotIndex) && !slot.isBot,
         // Характеристики
         hp: char.maxHp,
         maxHp: char.maxHp,
@@ -847,13 +900,22 @@ class SnowballGame {
       this.setButtonsDisabled(true);
       this.updateInstruction(`Сейчас думает и ходит: ${player.name}...`);
       const currentTurnId = player.id;
+      // В мультиплеере только хост управляет ходом ботов
+      if (this.gameType === 'multiplayer' && !network.isHost) {
+        return;
+      }
       setTimeout(() => {
         // Проверяем, что ход всё ещё принадлежит этому же игроку
         if (this.currentPlayerIndex === currentTurnId && this.activeTurnPlayerId === currentTurnId) {
           this.executeBotTurn();
         }
       }, 1000);
+    } else if (player.isRemotePlayer) {
+      // Ход другого удаленного игрока через интернет
+      this.setButtonsDisabled(true);
+      this.updateInstruction(`Ход делает: ${player.name}. Ожидание действий по сети...`);
     } else {
+      // Мой локальный ход
       this.setButtonsDisabled(false);
       this.updateInstruction('Ваш ход! Выберите клетку для шага или используйте действие внизу.');
     }
@@ -892,12 +954,21 @@ class SnowballGame {
 
     this.logCombat(`${player.name} слепил снежок: "${newCard.name}" ${newCard.art}!`, 'gather');
     this.updateHandDisplay();
+
+    if (this.gameType === 'multiplayer') {
+      network.sendNetworkAction({
+        type: 'NET_PLAYER_GATHER',
+        playerId: player.id
+      });
+    }
+
     this.endTurn();
   }
 
   // 2. ДЕЙСТВИЕ: Режим метания снежка
   handlePlayerActionThrowMode() {
     const player = this.players[this.currentPlayerIndex];
+    if (player.isRemotePlayer) return;
     if (player.hand.length === 0) {
       alert('У вас нет готовых снежков! Нажмите "Собрать снежок" чтобы слепить.');
       return;
@@ -940,6 +1011,7 @@ class SnowballGame {
   // Клик по цели для метания снежка
   performSnowballThrow(targetPlayer) {
     const player = this.players[this.currentPlayerIndex];
+    if (player.isRemotePlayer) return;
     const card = player.hand[this.selectedSnowballIndex] || SNOWBALL_CARDS[0];
 
     const dist = HexMath.distance(player, targetPlayer);
@@ -985,10 +1057,26 @@ class SnowballGame {
     // Показ окна броска кубика
     this.showDiceAnimation(rawRoll, diceBonus, finalRoll, baseTargetScore, aim, dist, () => {
       const isHit = finalRoll >= baseTargetScore;
+      const totalDamage = Math.max(1, attacker.damage + card.damageMod);
+
+      if (this.gameType === 'multiplayer') {
+        network.sendNetworkAction({
+          type: 'NET_PLAYER_THROW',
+          attackerId: attacker.id,
+          targetId: target.id,
+          rawRoll,
+          diceBonus,
+          finalRoll,
+          neededScore: baseTargetScore,
+          aim,
+          dist,
+          isHit,
+          totalDamage
+        });
+      }
 
       if (isHit) {
         sounds.playHit();
-        const totalDamage = Math.max(1, attacker.damage + card.damageMod);
         target.hp -= totalDamage;
 
         let rollDesc = `${rawRoll}`;
@@ -1069,7 +1157,7 @@ class SnowballGame {
     }, 420);
 
     const currentTurnPlayer = this.players[this.currentPlayerIndex];
-    const isBot = currentTurnPlayer ? currentTurnPlayer.isBot : false;
+    const isAutoClose = currentTurnPlayer ? (currentTurnPlayer.isBot || currentTurnPlayer.isRemotePlayer) : false;
 
     setTimeout(() => {
       const isSuccess = finalRoll >= neededScore;
@@ -1086,7 +1174,7 @@ class SnowballGame {
         resultMsg.classList.add('miss');
       }
 
-      if (isBot) {
+      if (isAutoClose) {
         setTimeout(() => {
           overlay.classList.remove('active');
           if (onComplete) onComplete();
@@ -1105,6 +1193,7 @@ class SnowballGame {
   handlePlayerActionSkip() {
     sounds.playClick();
     const player = this.players[this.currentPlayerIndex];
+    if (player.isRemotePlayer) return;
     this.logCombat(`${player.name} завершил ход без действий.`, 'system');
     this.endTurn();
   }
@@ -1117,6 +1206,12 @@ class SnowballGame {
     const btnThrow = document.getElementById('btnActionThrow');
     if (btnThrow) btnThrow.classList.remove('active');
     this.setButtonsDisabled(true);
+
+    if (this.gameType === 'multiplayer') {
+      network.sendNetworkAction({
+        type: 'NET_END_TURN'
+      });
+    }
 
     if (!this.checkVictoryCondition()) {
       // Небольшая естественная пауза перед передачей хода следующему участнику (500 мс)
@@ -1164,32 +1259,17 @@ class SnowballGame {
     const nearest = opponents[0];
     const initialDist = HexMath.distance(bot, nearest);
 
-    // 1. Движение бота: приближение к цели или отступление
-    const proceedWithAction = () => {
-      setTimeout(() => {
-        // Проверяем, жив ли еще бот и принадлежит ли ему ход
-        if (bot.eliminated || this.currentPlayerIndex !== bot.id) return;
-
-        // Если снежков нет в руке — обязательно лепим снежок!
-        if (bot.hand.length === 0) {
-          sounds.playSnowballGather();
-          const card = this.getRandomSnowballCard();
-          bot.hand.push(card);
-          this.logCombat(`${bot.name} слепил снежок: "${card.name}" ${card.art}`, 'gather');
-          this.endTurn();
-          return;
-        }
-
-        // Если снежки есть — выбираем лучший или первый
-        const readyCard = bot.hand[0];
-        this.selectedSnowballIndex = 0;
-        this.performSnowballThrow(nearest);
-      }, 600);
-    };
-
     if (this.movePointsLeft > 0) {
       const bestMove = this.findBestBotMoveTile(bot, nearest, initialDist);
       if (bestMove && (bestMove.q !== bot.q || bestMove.r !== bot.r)) {
+        if (this.gameType === 'multiplayer') {
+          network.sendNetworkAction({
+            type: 'NET_PLAYER_MOVE',
+            playerId: bot.id,
+            targetQ: bestMove.q,
+            targetR: bestMove.r
+          });
+        }
         this.logCombat(`${bot.name} перебегает на (${bestMove.q}, ${bestMove.r})...`, 'move');
         this.animatePlayerMove(bot, bestMove.q, bestMove.r, 500, () => {
           proceedWithAction();
@@ -1424,7 +1504,7 @@ class SnowballGame {
 
     // 1. ФАЗА ДВИЖЕНИЯ
     if (this.turnPhase === 'move') {
-      if (player.isMoving) return; // Игрок уже плавно перемещается
+      if (player.isMoving || player.isRemotePlayer) return; // Игрок уже плавно перемещается или чужой ход
       const reachable = this.getReachableTiles(player, this.movePointsLeft);
       const isReachable = reachable.some((t) => t.q === hex.q && t.r === hex.r);
 
@@ -1433,6 +1513,15 @@ class SnowballGame {
         this.movePointsLeft -= dist;
         this.logCombat(`${player.name} идет на (${hex.q}, ${hex.r})... Осталось шагов: ${this.movePointsLeft}`, 'move');
         this.updateHud();
+
+        if (this.gameType === 'multiplayer') {
+          network.sendNetworkAction({
+            type: 'NET_PLAYER_MOVE',
+            playerId: player.id,
+            targetQ: hex.q,
+            targetR: hex.r
+          });
+        }
 
         // Запуск плавной интерполяции движения (500 мс)
         this.animatePlayerMove(player, hex.q, hex.r, 500, () => {

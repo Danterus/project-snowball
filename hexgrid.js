@@ -85,27 +85,25 @@ class HexMath {
 
 // Генератор карты из 7 зон
 class MapGenerator {
-  static generateMap() {
+  static generateMap(seed = null) {
     const tiles = new Map(); // key: "q,r" -> TileData
 
+    // Псевдослучайный генератор от seed для синхронизации карты у всех игроков
+    let s = seed !== null ? seed : Math.floor(Math.random() * 1000000);
+    const pseudoRandom = () => {
+      s = (s * 9301 + 49297) % 233280;
+      return s / 233280;
+    };
+
     // 7 шестиугольных зон: 1 центральная (0,0) и 6 окружающих зон.
-    // Для абсолютно цельного, непрерывного и симметричного полотна без дыр и щелей:
-    // Центральная зона имеет радиус R=2 (19 гексов).
-    // Центры 6 внешних зон расположены на расстоянии 3 гекса по направлениям:
-    // (2, 1), (-1, 2), (-3, 1), (-2, -1), (1, -2), (3, -1) (или по 6 направлениям HEX_DIRECTIONS со сдвигом).
-    // При смещениях (2,1), (-1,2), (-3,1), (-2,-1), (1,-2), (3,-1) центры находятся ровно на расстоянии sqrt(7) ~ 2.65,
-    // а смещения:
-    // (3, 0), (0, 3), (-3, 3), (-3, 0), (0, -3), (3, -3) дают расстояние ровно 3 гекса!
-    // Каждая зона имеет одинаковое число гексов (радиус 2 = 19 гексов).
-    // Зоны смыкаются краями, образуя единое бесшовное поле двора!
     const zoneCenters = [
       { id: 0, q: 0, r: 0, isCenter: true, rotation: 0, name: 'Центральная высота (Холм)' },
-      { id: 1, q: 3, r: 0, isCenter: false, rotation: Math.floor(Math.random() * 6), name: 'Сектор двора №1' },
-      { id: 2, q: 0, r: 3, isCenter: false, rotation: Math.floor(Math.random() * 6), name: 'Сектор двора №2' },
-      { id: 3, q: -3, r: 3, isCenter: false, rotation: Math.floor(Math.random() * 6), name: 'Сектор двора №3' },
-      { id: 4, q: -3, r: 0, isCenter: false, rotation: Math.floor(Math.random() * 6), name: 'Сектор двора №4' },
-      { id: 5, q: 0, r: -3, isCenter: false, rotation: Math.floor(Math.random() * 6), name: 'Сектор двора №5' },
-      { id: 6, q: 3, r: -3, isCenter: false, rotation: Math.floor(Math.random() * 6), name: 'Сектор двора №6' }
+      { id: 1, q: 3, r: 0, isCenter: false, rotation: Math.floor(pseudoRandom() * 6), name: 'Сектор двора №1' },
+      { id: 2, q: 0, r: 3, isCenter: false, rotation: Math.floor(pseudoRandom() * 6), name: 'Сектор двора №2' },
+      { id: 3, q: -3, r: 3, isCenter: false, rotation: Math.floor(pseudoRandom() * 6), name: 'Сектор двора №3' },
+      { id: 4, q: -3, r: 0, isCenter: false, rotation: Math.floor(pseudoRandom() * 6), name: 'Сектор двора №4' },
+      { id: 5, q: 0, r: -3, isCenter: false, rotation: Math.floor(pseudoRandom() * 6), name: 'Сектор двора №5' },
+      { id: 6, q: 3, r: -3, isCenter: false, rotation: Math.floor(pseudoRandom() * 6), name: 'Сектор двора №6' }
     ];
 
     // Шаблоны ландшафта внутри зоны (до вращения)
