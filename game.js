@@ -1055,7 +1055,7 @@ class SnowballGame {
     const aim = this.getEffectiveAimRange(attacker);
     const halfAim = Math.floor(aim / 2);
 
-    // Базовый расчет по дистанции:
+    // Базовый расчет сложности по дистанции:
     // 1) Дистанция <= половины прицела -> базово 2+
     // 2) Дистанция <= прицела -> базово 4+
     // 3) Дистанция > прицела -> 4 + (dist - aim)
@@ -1078,17 +1078,17 @@ class SnowballGame {
       needed += 2;
     }
 
-    // 3. Холм: если атакующий на холме -> +1 к атаке (требуется на 1 меньше, то есть -1 к сложности)
-    // Либо если атакующий на холме: +1 к требуемому кубику при атаке?
-    // В формуле броска:
-    // "На холме бросающий больше не имеет бонуса к дальности, а имеет +1 к требуемому кубику по себе, и сам имеет +1 к требуемому кубику при атаке."
-    if (this.isPlayerOnHill(attacker)) {
+    // 3. Холм: если цель на холме -> +1 к сложности попадания (когда бросают по нему)
+    if (this.isPlayerOnHill(target)) {
       needed += 1;
     }
 
-    // 4. Холм: если цель на холме -> +1 к требуемому кубику по себе
-    if (this.isPlayerOnHill(target)) {
-      needed += 1;
+    // 4. Бонус к самому броску кубика:
+    // - модификатор снежка (card.rangeMod)
+    // - если стрелок на холме: +1 к результату кубика при броске
+    let diceBonus = card?.rangeMod || 0;
+    if (this.isPlayerOnHill(attacker)) {
+      diceBonus += 1;
     }
 
     return {
@@ -1096,7 +1096,7 @@ class SnowballGame {
       aim,
       halfAim,
       neededScore: Math.max(1, needed),
-      diceBonus: card?.rangeMod || 0
+      diceBonus
     };
   }
 
@@ -1888,9 +1888,9 @@ class SnowballGame {
       tooltip.style.top = `${e.clientY + 14}px`;
 
       let terrainName = 'Чистый снег';
-      if (tile.isHill) terrainName = '⛰️ Снежный холм (+1 к броску кубика при атаке / по себе)';
-      if (tile.isSnowdrift) terrainName = '🌨️ Глубокий сугроб (+2 к кубику по цели, -1 шаг в след. ход)';
-      if (tile.isObstacle) terrainName = '🌲 Снежная ель (укрытие: +3 к кубику сквозь дерево)';
+      if (tile.isHill) terrainName = '⛰️ Снежный холм (+1 к броску кубика при атаке, +1 к сложности при защите)';
+      if (tile.isSnowdrift) terrainName = '🌨️ Глубокий сугроб (+2 к сложности по цели, -1 шаг в след. ход)';
+      if (tile.isObstacle) terrainName = '🌲 Снежная ель (укрытие: +3 к сложности сквозь дерево)';
       if (tile.terrain === 'ice') terrainName = '⛸️ Скользкий лед';
 
       let text = `<strong>Гекс (${hex.q}, ${hex.r})</strong><br>${terrainName}`;
@@ -2257,23 +2257,24 @@ class SnowballGame {
     if (targetPlayer) {
       const calc = this.calculateNeededRoll(currentPlayer, targetPlayer, card);
       const needed = calc.neededScore;
+      const totalDiceBonus = calc.diceBonus;
 
       let badgeText = `Кубик: ${needed}+`;
-      if (diceBonus > 0) badgeText += ` (+${diceBonus})`;
-      else if (diceBonus < 0) badgeText += ` (${diceBonus})`;
+      if (totalDiceBonus > 0) badgeText += ` (+${totalDiceBonus})`;
+      else if (totalDiceBonus < 0) badgeText += ` (${totalDiceBonus})`;
 
       // Добавляем подсказки модификаторов укрытий
       const modifiers = [];
       if (this.hasTreeBetween(currentPlayer, targetPlayer)) modifiers.push('🌲+3');
       if (this.isPlayerInSnowdrift(targetPlayer)) modifiers.push('🌨️+2');
-      if (this.isPlayerOnHill(currentPlayer)) modifiers.push('⛰️+1');
-      if (this.isPlayerOnHill(targetPlayer)) modifiers.push('⛰️+1');
+      if (this.isPlayerOnHill(targetPlayer)) modifiers.push('⛰️цель+1');
+      if (this.isPlayerOnHill(currentPlayer)) modifiers.push('⛰️атака+1');
 
       if (modifiers.length > 0) {
         badgeText += ` [${modifiers.join(' ')}]`;
       }
 
-      const badgeWidth = modifiers.length > 0 ? 130 : 90;
+      const badgeWidth = modifiers.length > 0 ? 150 : 90;
 
       ctx.fillStyle = 'rgba(10, 25, 47, 0.9)';
       ctx.fillRect(toPx.x - badgeWidth / 2, toPx.y - 45, badgeWidth, 22);
