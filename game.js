@@ -1049,6 +1049,57 @@ class SnowballGame {
     return Math.max(1, range);
   }
 
+  // Вычисление требуемого значения кубика D6 с учетом всех модификаторов
+  calculateNeededRoll(attacker, target, card) {
+    const dist = HexMath.distance(attacker, target);
+    const aim = this.getEffectiveAimRange(attacker);
+    const halfAim = Math.floor(aim / 2);
+
+    // Базовый расчет по дистанции:
+    // 1) Дистанция <= половины прицела -> базово 2+
+    // 2) Дистанция <= прицела -> базово 4+
+    // 3) Дистанция > прицела -> 4 + (dist - aim)
+    let needed = 2;
+    if (dist <= halfAim) {
+      needed = 2;
+    } else if (dist <= aim) {
+      needed = 4;
+    } else {
+      needed = 4 + (dist - aim);
+    }
+
+    // 1. Дерево на пути между стрелком и целью: +3 к требуемому кубику
+    if (this.hasTreeBetween(attacker, target)) {
+      needed += 3;
+    }
+
+    // 2. Глубокий сугроб: если цель стоит в сугробе -> +2 к требуемому кубику
+    if (this.isPlayerInSnowdrift(target)) {
+      needed += 2;
+    }
+
+    // 3. Холм: если атакующий на холме -> +1 к атаке (требуется на 1 меньше, то есть -1 к сложности)
+    // Либо если атакующий на холме: +1 к требуемому кубику при атаке?
+    // В формуле броска:
+    // "На холме бросающий больше не имеет бонуса к дальности, а имеет +1 к требуемому кубику по себе, и сам имеет +1 к требуемому кубику при атаке."
+    if (this.isPlayerOnHill(attacker)) {
+      needed += 1;
+    }
+
+    // 4. Холм: если цель на холме -> +1 к требуемому кубику по себе
+    if (this.isPlayerOnHill(target)) {
+      needed += 1;
+    }
+
+    return {
+      dist,
+      aim,
+      halfAim,
+      neededScore: Math.max(1, needed),
+      diceBonus: card?.rangeMod || 0
+    };
+  }
+
   // 1. ДЕЙСТВИЕ: Собрать снежок (слепить новый)
   handlePlayerActionGather() {
     const player = this.players[this.currentPlayerIndex];
@@ -1138,50 +1189,11 @@ class SnowballGame {
     });
   }
 
-  // Механика кубика: D6 >= (Прицел - Дистанция)
+  // Механика кубика: D6 >= Сложность с учетом дистанции, снежка и укрытий
   executeDiceThrow(attacker, target, card, dist, aim) {
-    // Новая формула расчета сложности попадания:
-    // 1) Дистанция <= половины прицела (округление вниз) -> базово нужно 2+
-    // 2) Дистанция > половины и <= прицела -> базово нужно 4+
-    // 3) За каждую последующую клетку свыше прицела -> +1 к сложности (4 + dist - aim)
-    const halfAim = Math.floor(aim / 2);
-    let baseTargetScore = 2;
-    if (dist <= halfAim) {
-      baseTargetScore = 2;
-    } else if (dist <= aim) {
-      baseTargetScore = 4;
-    } else {
-      baseTargetScore = 4 + (dist - aim);
-    }
-
-    // Модификаторы окружения:
-    // 1. Дерево на пути между стрелком и целью: +3 к требуемому кубику
-    const hasTree = this.hasTreeBetween(attacker, target);
-    if (hasTree) {
-      baseTargetScore += 3;
-    }
-
-    // 2. Глубокий сугроб: если цель стоит в сугробе -> +2 к требуемому кубику
-    const targetInDrift = this.isPlayerInSnowdrift(target);
-    if (targetInDrift) {
-      baseTargetScore += 2;
-    }
-
-    // 3. Холм: если атакующий на холме -> +1 к требуемому кубику при атаке
-    const attackerOnHill = this.isPlayerOnHill(attacker);
-    if (attackerOnHill) {
-      baseTargetScore += 1;
-    }
-
-    // 4. Холм: если цель на холме -> +1 к требуемому кубику по себе
-    const targetOnHill = this.isPlayerOnHill(target);
-    if (targetOnHill) {
-      baseTargetScore += 1;
-    }
-
-    // Снежок дает модификатор к броску кубика:
-    // diceBonus = card.rangeMod (если +2, то к результату кубика прибавляется +2)
-    const diceBonus = card.rangeMod || 0;
+    const calc = this.calculateNeededRoll(attacker, target, card);
+    const baseTargetScore = calc.neededScore;
+    const diceBonus = calc.diceBonus;
 
     // Бросок шестигранного кубика (1..6)
     const rawRoll = Math.floor(Math.random() * 6) + 1;
@@ -1189,7 +1201,7 @@ class SnowballGame {
     sounds.playDiceRoll();
 
     // Показ окна броска кубика
-    this.showDiceAnimation(rawRoll, diceBonus, finalRoll, baseTargetScore, aim, dist, () => {
+    this.showDiceAnimation(rawRoll, diceBonus, finalRoll, baseTargetScore, calc.aim, calc.dist, () => {
       const isHit = finalRoll >= baseTargetScore;
       const totalDamage = Math.max(1, attacker.damage + card.damageMod);
 
@@ -1779,6 +1791,18 @@ class SnowballGame {
       let text = `<strong>Гекс (${hex.q}, ${hex.r})</strong><br>${terrainName}`;
       if (occupant) {
         text += `<br>👤 <strong>${occupant.name}</strong> (HP: ${occupant.hp}/${occupant.maxHp})`;
+
+        // Если сейчас режим прицеливания и это соперник — показываем точный расчет броска в тултипе!
+        const currentTurnPlayer = this.players[this.currentPlayerIndex];
+        if (this.turnPhase === 'throw_target' && currentTurnPlayer && occupant.id !== currentTurnPlayer.id) {
+          const card = currentTurnPlayer.hand[this.selectedSnowballIndex] || SNOWBALL_CARDS[0];
+          const calc = this.calculateNeededRoll(currentTurnPlayer, occupant, card);
+          let rollInfo = `<br>🎯 <strong>Сложность попадания: ${calc.neededScore}+</strong>`;
+          if (calc.diceBonus !== 0) {
+            rollInfo += ` (Снежок: ${calc.diceBonus > 0 ? '+' : ''}${calc.diceBonus})`;
+          }
+          text += rollInfo;
+        }
       }
       tooltip.innerHTML = text;
     } else {
@@ -2126,19 +2150,31 @@ class SnowballGame {
 
     // Значок цели и расчёт броска над целью
     if (targetPlayer) {
-      const halfAim = Math.floor(aim / 2);
-      let needed = dist <= halfAim ? 2 : (dist <= aim ? 4 : 4 + (dist - aim));
-      needed = Math.max(1, needed);
+      const calc = this.calculateNeededRoll(currentPlayer, targetPlayer, card);
+      const needed = calc.neededScore;
 
       let badgeText = `Кубик: ${needed}+`;
       if (diceBonus > 0) badgeText += ` (+${diceBonus})`;
       else if (diceBonus < 0) badgeText += ` (${diceBonus})`;
 
+      // Добавляем подсказки модификаторов укрытий
+      const modifiers = [];
+      if (this.hasTreeBetween(currentPlayer, targetPlayer)) modifiers.push('🌲+3');
+      if (this.isPlayerInSnowdrift(targetPlayer)) modifiers.push('🌨️+2');
+      if (this.isPlayerOnHill(currentPlayer)) modifiers.push('⛰️+1');
+      if (this.isPlayerOnHill(targetPlayer)) modifiers.push('⛰️+1');
+
+      if (modifiers.length > 0) {
+        badgeText += ` [${modifiers.join(' ')}]`;
+      }
+
+      const badgeWidth = modifiers.length > 0 ? 130 : 90;
+
       ctx.fillStyle = 'rgba(10, 25, 47, 0.9)';
-      ctx.fillRect(toPx.x - 45, toPx.y - 45, 90, 22);
+      ctx.fillRect(toPx.x - badgeWidth / 2, toPx.y - 45, badgeWidth, 22);
       ctx.strokeStyle = inOptimalRange ? '#00e676' : '#ffb300';
       ctx.lineWidth = 1;
-      ctx.strokeRect(toPx.x - 45, toPx.y - 45, 90, 22);
+      ctx.strokeRect(toPx.x - badgeWidth / 2, toPx.y - 45, badgeWidth, 22);
 
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 11px sans-serif';
