@@ -67,6 +67,20 @@ class HexMath {
     return (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2;
   }
 
+  // Линия между двумя гексами (линейная интерполяция)
+  static hexLine(a, b) {
+    const N = this.distance(a, b);
+    if (N === 0) return [this.axialRound(a.q, a.r)];
+    const results = [];
+    for (let i = 0; i <= N; i++) {
+      const t = i / N;
+      const q = a.q + (b.q - a.q) * t;
+      const r = a.r + (b.r - a.r) * t;
+      results.push(this.axialRound(q, r));
+    }
+    return results;
+  }
+
   // Поворот осевой координаты вокруг центра (0,0) на шаг 60° по часовой стрелке
   // Осевой поворот: (q, r, s) -> (-r, -s, -q) где s = -q-r -> (-r, q+r)
   static rotate60(q, r, steps = 1) {

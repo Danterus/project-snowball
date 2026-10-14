@@ -1212,10 +1212,10 @@ body, html {
 .game-hud-bottom {
   background: var(--panel-bg);
   border-top: 1px solid var(--panel-border);
-  padding: 10px 20px 14px;
+  padding: 8px 16px 10px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   z-index: 100;
 }
 
@@ -1223,7 +1223,7 @@ body, html {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 0;
+  padding: 2px 0;
 }
 
 .move-points-badge {
@@ -1244,17 +1244,49 @@ body, html {
   flex: 1;
 }
 
+/* Разделение нижней панели на две колонки: слева снежки, справа действия */
+.hud-bottom-columns {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 16px;
+  align-items: center;
+}
+
+.player-hand-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.hand-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.cards-carousel {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 2px 0 4px;
+  min-height: 105px;
+  align-items: center;
+}
+
 .action-buttons-group {
   display: flex;
-  gap: 12px;
-  justify-content: center;
+  gap: 10px;
+  align-items: center;
 }
 
 .action-btn {
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 12px;
-  padding: 8px 18px;
+  padding: 8px 14px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -1262,7 +1294,7 @@ body, html {
   gap: 2px;
   color: #fff;
   transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
-  min-width: 140px;
+  min-width: 110px;
 }
 
 .action-btn:hover:not(:disabled) {

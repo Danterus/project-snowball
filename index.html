@@ -246,6 +246,7 @@
         </div>
 
         <div class="hud-right">
+          <button id="btnToggleCombatLog" class="btn-hud" title="Снежная летопись / Лог боя">📜 Лог</button>
           <button id="btnCenterCamera" class="btn-hud" title="Центрировать камеру">🎯 Центр</button>
           <button id="btnZoomIn" class="btn-hud" title="Приблизить">+</button>
           <button id="btnZoomOut" class="btn-hud" title="Отдалить">-</button>
@@ -291,9 +292,27 @@
             <h2 id="winnerTitle">ПОБЕДИТЕЛЬ!</h2>
             <div class="winner-character-preview" id="winnerPreview"></div>
             <p id="winnerSubtitle">Остался единственным непобежденным снежным королем двора!</p>
-            <div class="game-over-actions">
+            <div class="game-over-actions" id="gameOverActionsStandard">
               <button id="btnPlayAgain" class="btn btn-primary btn-glow">Сыграть ещё раз</button>
               <button id="btnExitToMenu" class="btn btn-outline">Выйти в главное меню</button>
+            </div>
+            <!-- Меню завершения для мультиплеера -->
+            <div class="game-over-actions" id="gameOverActionsMultiplayer" style="display: none; flex-direction: column; gap: 10px; width: 100%;">
+              <div id="rematchStatusBox" style="font-size: 0.85rem; color: #ffd54f; min-height: 24px; text-align: center;"></div>
+              <!-- Кнопки хоста -->
+              <div id="hostGameOverButtons" style="display: flex; gap: 12px; width: 100%;">
+                <button id="btnHostRematch" class="btn btn-primary btn-glow" style="flex: 1;">⚔️ Реванш (30с)</button>
+                <button id="btnHostBackToRoom" class="btn btn-outline" style="flex: 1;">🏠 В комнату</button>
+              </div>
+              <!-- Диалог согласия на реванш для клиентов / игроков -->
+              <div id="rematchPromptBox" style="display: none; background: rgba(0,0,0,0.3); padding: 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.15); text-align: center;">
+                <div style="font-weight: 800; margin-bottom: 6px;">Предложен реванш теми же героями!</div>
+                <div style="font-size: 0.85rem; color: #80d8ff; margin-bottom: 10px;">Осталось времени: <strong id="rematchTimerVal">30</strong> сек</div>
+                <div style="display: flex; gap: 10px; justify-content: center;">
+                  <button id="btnAcceptRematch" class="btn btn-primary">✅ Принять реванш</button>
+                  <button id="btnDeclineRematch" class="btn btn-outline" style="border-color: #ff5252; color: #ff5252;">❌ Отказаться</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -305,10 +324,13 @@
           <!-- Статусы игроков генерируются динамически -->
         </div>
 
-        <div class="combat-log-container">
+        <div class="combat-log-container" id="combatLogContainer" style="display: none;">
           <div class="combat-log-title">
             <span>📜 Снежная летопись</span>
-            <button id="btnClearLog" title="Очистить лог">🧹</button>
+            <div style="display:flex; gap:6px;">
+              <button id="btnClearLog" title="Очистить лог">🧹</button>
+              <button id="btnCloseCombatLog" title="Закрыть лог">✖</button>
+            </div>
           </div>
           <div class="combat-log" id="combatLog">
             <div class="log-entry system">Битва началась! 7 зон покрыты чистым снегом.</div>
@@ -316,7 +338,7 @@
         </div>
       </aside>
 
-      <!-- Нижняя панель действий игрока -->
+      <!-- Нижняя панель действий игрока (разбита на две: слева снежки, справа действия) -->
       <footer class="game-hud-bottom">
         <!-- Информация о текущем ходе и доступных очках движения -->
         <div class="action-status-bar">
@@ -328,41 +350,43 @@
           </div>
         </div>
 
-        <!-- Кнопки действий -->
-        <div class="action-buttons-group">
-          <button id="btnActionGather" class="action-btn" title="Слепить снежок из сугроба">
-            <span class="action-icon">🧤</span>
-            <span class="action-label">Собрать снежок</span>
-            <small>Получить карту снежка</small>
-          </button>
-
-          <button id="btnActionThrow" class="action-btn" title="Выбрать снежок и бросить в соперника">
-            <span class="action-icon">🎯</span>
-            <span class="action-label" id="lblActionThrow">Метнуть снежок</span>
-            <small id="subActionThrow">Бросок по цели с кубиком</small>
-          </button>
-
-          <button id="btnActionCancelAim" class="action-btn btn-cancel-aim" id="btnActionCancelAim" style="display: none;" title="Отменить бросок и вернуться к движению">
-            <span class="action-icon">↩️</span>
-            <span class="action-label">Отмена / Шаг</span>
-            <small>Вернуться к движению</small>
-          </button>
-
-          <button id="btnActionSkip" class="action-btn btn-skip" title="Завершить текущий ход">
-            <span class="action-icon">⏭️</span>
-            <span class="action-label">Пропустить / Конец хода</span>
-            <small>Передать ход дальше</small>
-          </button>
-        </div>
-
-        <!-- Карты снежков на руках у игрока -->
-        <div class="player-hand-container">
-          <div class="hand-header">
-            <span>🧤 Ваши снежки на руках (<span id="handCount">0</span>/4):</span>
-            <small id="handHint">Нажмите на снежок для броска</small>
+        <div class="hud-bottom-columns">
+          <!-- Левая колонка: Карты снежков на руках у игрока -->
+          <div class="player-hand-container" id="playerHandContainer">
+            <div class="hand-header">
+              <span>🧤 Ваши снежки на руках (<span id="handCount">0</span>/4):</span>
+              <small id="handHint">Нажмите на снежок для броска</small>
+            </div>
+            <div class="cards-carousel" id="cardsCarousel">
+              <!-- Карты снежков генерируются тут -->
+            </div>
           </div>
-          <div class="cards-carousel" id="cardsCarousel">
-            <!-- Карты снежков генерируются тут -->
+
+          <!-- Правая колонка: Кнопки действий -->
+          <div class="action-buttons-group">
+            <button id="btnActionGather" class="action-btn" title="Слепить снежок из сугроба">
+              <span class="action-icon">🧤</span>
+              <span class="action-label">Собрать снежок</span>
+              <small>Получить карту снежка</small>
+            </button>
+
+            <button id="btnActionThrow" class="action-btn" title="Выбрать снежок и бросить в соперника">
+              <span class="action-icon">🎯</span>
+              <span class="action-label" id="lblActionThrow">Метнуть снежок</span>
+              <small id="subActionThrow">Бросок по цели с кубиком</small>
+            </button>
+
+            <button id="btnActionCancelAim" class="action-btn btn-cancel-aim" style="display: none;" title="Отменить бросок и вернуться к движению">
+              <span class="action-icon">↩️</span>
+              <span class="action-label">Отмена / Шаг</span>
+              <small>Вернуться к движению</small>
+            </button>
+
+            <button id="btnActionSkip" class="action-btn btn-skip" title="Завершить текущий ход">
+              <span class="action-icon">⏭️</span>
+              <span class="action-label">Пропустить ход</span>
+              <small>Передать ход дальше</small>
+            </button>
           </div>
         </div>
       </footer>
@@ -403,13 +427,16 @@
           </div>
 
           <div class="rule-block">
-            <h3>🎲 Новая механика попадания кубиком D6</h3>
-            <p>Условие попадания зависит от прицельной дальности героя:</p>
+            <h3>🎲 Механика попадания кубиком D6 и укрытия</h3>
+            <p>Условие попадания зависит от прицельной дальности героя и окружения:</p>
             <div class="formula-box">
               <ul>
                 <li><strong>Дистанция &le; 1/2 дальности прицела</strong> (округление вниз): нужно выбросить <strong>2+</strong>.</li>
                 <li><strong>Дистанция от 1/2 до максимального прицела</strong>: нужно выбросить <strong>4+</strong>.</li>
                 <li><strong>Свыше максимальной дальности</strong>: за каждую дополнительную клетку <strong>+1 к сложности</strong> (5+, 6+ и т.д.).</li>
+                <li><strong>🌲 Дерево на пути:</strong> если между стрелком и целью стоит дерево — это <strong>+3</strong> к требуемому кубику.</li>
+                <li><strong>🌨️ Глубокий сугроб:</strong> цель в сугробе получает <strong>+2</strong> к сложности попадания по ней, но начинает следующий ход с <strong>-1 к очкам движения</strong>.</li>
+                <li><strong>⛰️ Холм:</strong> бросающий с холма имеет <strong>+1 к результату атаки</strong>, а стреляющие снизу получают <strong>+1 к требуемому кубику</strong>.</li>
                 <li><strong>Бонус снежка:</strong> легкий снежок добавляет <strong>+2 к результату броска кубика</strong>, тяжелый <strong>-1 к результату</strong>.</li>
               </ul>
             </div>

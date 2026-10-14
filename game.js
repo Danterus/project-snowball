@@ -290,6 +290,25 @@ class SnowballGame {
         }
       } else if (msg.type === 'START_BATTLE_SYNC') {
         this.startBattle(false, msg.mapSeed);
+      } else if (msg.type === 'FAST_FORWARD_TIMER') {
+        // Ускорение таймера выбора до 3 секунд
+        if (this.charSelectSecondsLeft > (msg.seconds || 3)) {
+          this.charSelectSecondsLeft = msg.seconds || 3;
+          const timerVal = document.getElementById('charSelectTimerVal');
+          if (timerVal) timerVal.textContent = this.charSelectSecondsLeft;
+        }
+      } else if (msg.type === 'HOST_RETURN_TO_ROOM') {
+        // Возврат в лобби
+        this.handleReturnToRoom();
+      } else if (msg.type === 'REMATCH_OFFERED') {
+        // Предложение реванша
+        this.handleRematchOffered(msg.timeoutSeconds || 30);
+      } else if (msg.type === 'REMATCH_RESPONSE') {
+        // Ответ игрока на реванш (согласился / отказался)
+        this.handleRematchResponse(msg.slotIndex, msg.accepted);
+      } else if (msg.type === 'REMATCH_START') {
+        // Все согласились — реванш начинается!
+        this.startRematchBattle(msg.mapSeed);
       } else if (msg.type === 'NET_PLAYER_MOVE') {
         // Синхронное перемещение персонажа на гекс
         const p = this.players[msg.playerId];
@@ -360,6 +379,26 @@ class SnowballGame {
       }
     });
 
+    // Кнопка показа/скрытия лога в шапке
+    const btnToggleLog = document.getElementById('btnToggleCombatLog');
+    const logBox = document.getElementById('combatLogContainer');
+    const btnCloseLog = document.getElementById('btnCloseCombatLog');
+
+    if (btnToggleLog && logBox) {
+      btnToggleLog.addEventListener('click', () => {
+        sounds.playClick();
+        const isHidden = logBox.style.display === 'none';
+        logBox.style.display = isHidden ? 'flex' : 'none';
+      });
+    }
+
+    if (btnCloseLog && logBox) {
+      btnCloseLog.addEventListener('click', () => {
+        sounds.playClick();
+        logBox.style.display = 'none';
+      });
+    }
+
     // Управление внутри боя
     document.getElementById('btnCenterCamera').addEventListener('click', () => {
       sounds.playClick();
@@ -415,7 +454,7 @@ class SnowballGame {
       document.getElementById('diceCloseBtn').style.display = 'none';
     });
 
-    // Экран победы
+    // Экран победы (Стандартный одиночный/локальный режим)
     document.getElementById('btnPlayAgain').addEventListener('click', () => {
       sounds.playClick();
       document.getElementById('gameOverModal').classList.remove('active');
@@ -427,6 +466,39 @@ class SnowballGame {
       document.getElementById('gameOverModal').classList.remove('active');
       this.switchScreen('mainMenu');
     });
+
+    // Экран победы (Мультиплеер)
+    const btnHostBackToRoom = document.getElementById('btnHostBackToRoom');
+    if (btnHostBackToRoom) {
+      btnHostBackToRoom.addEventListener('click', () => {
+        sounds.playClick();
+        this.handleHostClickReturnToRoom();
+      });
+    }
+
+    const btnHostRematch = document.getElementById('btnHostRematch');
+    if (btnHostRematch) {
+      btnHostRematch.addEventListener('click', () => {
+        sounds.playClick();
+        this.handleHostClickRematch();
+      });
+    }
+
+    const btnAcceptRematch = document.getElementById('btnAcceptRematch');
+    if (btnAcceptRematch) {
+      btnAcceptRematch.addEventListener('click', () => {
+        sounds.playClick();
+        this.handlePlayerAcceptRematch();
+      });
+    }
+
+    const btnDeclineRematch = document.getElementById('btnDeclineRematch');
+    if (btnDeclineRematch) {
+      btnDeclineRematch.addEventListener('click', () => {
+        sounds.playClick();
+        this.handlePlayerDeclineRematch();
+      });
+    }
 
     // Интерактив холста (Перетаскивание и клик по гексам)
     this.setupCanvasInteractions();
@@ -538,6 +610,12 @@ class SnowballGame {
       `;
 
       card.addEventListener('click', () => {
+        // Если выбор уже подтвержден, не даем менять персонажа
+        if (this.gameType === 'multiplayer' && this.configuredSlots[this.selectedSlotIndex]?.confirmed) {
+          alert('Вы уже зафиксировали свой выбор!');
+          return;
+        }
+
         // Проверяем, не занят ли персонаж другим слотом
         const isTakenByOther = this.configuredSlots.slice(0, this.playerCount).some(
           (s, idx) => idx !== this.selectedSlotIndex && s.character.id === char.id
@@ -673,10 +751,19 @@ class SnowballGame {
     const activeSlots = this.configuredSlots.slice(0, this.playerCount);
     const allConfirmed = activeSlots.every(s => s.confirmed || s.isBot);
 
-    if (allConfirmed && network.isHost) {
-      clearInterval(this.charSelectTimerInterval);
-      network.sendNetworkAction({ type: 'START_BATTLE_SYNC' });
-      this.startBattle(true);
+    // Если все зафиксировали выбор — снижаем таймер до 3 секунд (если он больше)
+    if (allConfirmed) {
+      if (this.charSelectSecondsLeft > 3) {
+        this.charSelectSecondsLeft = 3;
+        const timerVal = document.getElementById('charSelectTimerVal');
+        if (timerVal) timerVal.textContent = 3;
+      }
+      if (network.isHost) {
+        network.sendNetworkAction({
+          type: 'FAST_FORWARD_TIMER',
+          seconds: 3
+        });
+      }
     }
   }
 
@@ -772,10 +859,10 @@ class SnowballGame {
       const char = slot.character;
       const spawn = spawnPoints[i] || { q: 0, r: 0 };
 
-      // Стартовая рука: каждому игроку дается 2 случайных снежка
+      // Стартовая рука: каждый игрок начинает ровно с двумя ОБЫЧНЫМИ снежками
       const hand = [
-        this.getRandomSnowballCard(),
-        this.getRandomSnowballCard()
+        { ...SNOWBALL_CARDS[0] },
+        { ...SNOWBALL_CARDS[0] }
       ];
 
       this.players.push({
@@ -880,9 +967,16 @@ class SnowballGame {
     let movePenalty = 0;
     player.activeEffects = player.activeEffects.filter((eff) => {
       if (eff.type === 'freeze') movePenalty += eff.movePenalty;
+      if (eff.type === 'snowdrift_slow') movePenalty += eff.movePenalty;
       eff.duration--;
       return eff.duration > 0;
     });
+
+    // Если игрок начинает ход, стоя в сугробе — на следующий ход получает -1 к очкам движения (но не меньше 1)
+    if (this.isPlayerInSnowdrift(player)) {
+      movePenalty += 1;
+      this.logCombat(`🌨️ ${player.name} увяз в глубоком сугробе (-1 к очкам движения)!`, 'system');
+    }
 
     this.turnPhase = 'move';
     this.movePointsLeft = Math.max(1, player.baseMoveSpeed - movePenalty);
@@ -921,18 +1015,33 @@ class SnowballGame {
     }
   }
 
-  // Проверка попадания на холм (+1 к дальности прицела)
+  // Проверка попадания на холм
   isPlayerOnHill(player) {
-    const tile = this.map.tiles.get(`${player.q},${player.r}`);
+    const tile = this.map?.tiles?.get(`${player.q},${player.r}`);
     return tile && tile.isHill;
   }
 
-  // Вычисление итоговой прицельной дальности (снежок больше не меняет range, он дает бонус к кубику)
+  // Проверка, стоит ли игрок в сугробе
+  isPlayerInSnowdrift(player) {
+    const tile = this.map?.tiles?.get(`${player.q},${player.r}`);
+    return tile && tile.isSnowdrift;
+  }
+
+  // Проверка, находится ли между стрелком и целью дерево (препятствие)
+  hasTreeBetween(attacker, target) {
+    const line = HexMath.hexLine(attacker, target);
+    for (let i = 1; i < line.length - 1; i++) {
+      const tile = this.map?.tiles?.get(`${line[i].q},${line[i].r}`);
+      if (tile && (tile.isObstacle || tile.terrain === 'tree')) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Вычисление итоговой прицельной дальности (на холме больше нет бонуса к дальности)
   getEffectiveAimRange(player) {
     let range = player.baseAimRange;
-    if (this.isPlayerOnHill(player)) {
-      range += 1; // Тактическое преимущество холма в центре
-    }
     // Проверка штрафа ослепления
     player.activeEffects.forEach((eff) => {
       if (eff.type === 'blind') range -= eff.rangePenalty;
@@ -1045,6 +1154,31 @@ class SnowballGame {
       baseTargetScore = 4 + (dist - aim);
     }
 
+    // Модификаторы окружения:
+    // 1. Дерево на пути между стрелком и целью: +3 к требуемому кубику
+    const hasTree = this.hasTreeBetween(attacker, target);
+    if (hasTree) {
+      baseTargetScore += 3;
+    }
+
+    // 2. Глубокий сугроб: если цель стоит в сугробе -> +2 к требуемому кубику
+    const targetInDrift = this.isPlayerInSnowdrift(target);
+    if (targetInDrift) {
+      baseTargetScore += 2;
+    }
+
+    // 3. Холм: если атакующий на холме -> +1 к требуемому кубику при атаке
+    const attackerOnHill = this.isPlayerOnHill(attacker);
+    if (attackerOnHill) {
+      baseTargetScore += 1;
+    }
+
+    // 4. Холм: если цель на холме -> +1 к требуемому кубику по себе
+    const targetOnHill = this.isPlayerOnHill(target);
+    if (targetOnHill) {
+      baseTargetScore += 1;
+    }
+
     // Снежок дает модификатор к броску кубика:
     // diceBonus = card.rangeMod (если +2, то к результату кубика прибавляется +2)
     const diceBonus = card.rangeMod || 0;
@@ -1124,7 +1258,7 @@ class SnowballGame {
     if (diceBonus > 0) bonusText = ` | Снежок: +${diceBonus} к кубику`;
     else if (diceBonus < 0) bonusText = ` | Снежок: ${diceBonus} к кубику`;
 
-    calc.innerHTML = `Дистанция: <strong>${dist}</strong> (Прицел: ${aim}, 1/2: ${halfAim})${bonusText}<br>Нужно выбросить: <strong>${neededScore}+</strong>`;
+    calc.innerHTML = `Дистанция: <strong>${dist}</strong> (Прицел: ${aim})${bonusText}<br>Сложность попадания с учетом окружения: <strong>${neededScore}+</strong>`;
     resultMsg.textContent = 'Кубик летит и кувыркается...';
     resultMsg.className = 'dice-result-msg';
     closeBtn.style.display = 'none';
@@ -1329,7 +1463,167 @@ class SnowballGame {
       subtitle.textContent = `Все попадали в сугробы!`;
     }
 
+    const stdActions = document.getElementById('gameOverActionsStandard');
+    const mpActions = document.getElementById('gameOverActionsMultiplayer');
+    const hostBtns = document.getElementById('hostGameOverButtons');
+    const rematchPrompt = document.getElementById('rematchPromptBox');
+    const rematchStatus = document.getElementById('rematchStatusBox');
+
+    if (this.gameType === 'multiplayer') {
+      if (stdActions) stdActions.style.display = 'none';
+      if (mpActions) mpActions.style.display = 'flex';
+      if (rematchPrompt) rematchPrompt.style.display = 'none';
+      if (rematchStatus) rematchStatus.textContent = '';
+
+      if (network.isHost) {
+        if (hostBtns) hostBtns.style.display = 'flex';
+      } else {
+        if (hostBtns) hostBtns.style.display = 'none';
+        if (rematchStatus) rematchStatus.textContent = 'Ожидание решения создателя комнаты...';
+      }
+    } else {
+      if (stdActions) stdActions.style.display = 'flex';
+      if (mpActions) mpActions.style.display = 'none';
+    }
+
     modal.classList.add('active');
+  }
+
+  // ==========================================================================
+  // МУЛЬТИПЛЕЕР: ВОЗВРАТ В КОМНАТУ И РЕВАНШ
+  // ==========================================================================
+  handleHostClickReturnToRoom() {
+    if (!network.isHost) return;
+    network.sendNetworkAction({ type: 'HOST_RETURN_TO_ROOM' });
+    this.handleReturnToRoom();
+  }
+
+  handleReturnToRoom() {
+    clearInterval(this.rematchInterval);
+    const modal = document.getElementById('gameOverModal');
+    if (modal) modal.classList.remove('active');
+    this.switchScreen('lobbyScreen');
+    network.syncRoomState();
+  }
+
+  handleHostClickRematch() {
+    if (!network.isHost) return;
+    // Инициализируем статус ответов на реванш
+    this.rematchResponses = {};
+    const mySlot = network.mySlotIndex || 0;
+    this.rematchResponses[mySlot] = true;
+
+    network.sendNetworkAction({
+      type: 'REMATCH_OFFERED',
+      timeoutSeconds: 30
+    });
+
+    this.handleRematchOffered(30);
+  }
+
+  handleRematchOffered(seconds = 30) {
+    clearInterval(this.rematchInterval);
+    const hostBtns = document.getElementById('hostGameOverButtons');
+    const promptBox = document.getElementById('rematchPromptBox');
+    const timerVal = document.getElementById('rematchTimerVal');
+    const statusBox = document.getElementById('rematchStatusBox');
+
+    if (hostBtns) hostBtns.style.display = 'none';
+    if (promptBox) promptBox.style.display = 'block';
+
+    let left = seconds;
+    if (timerVal) timerVal.textContent = left;
+    if (statusBox) statusBox.textContent = 'Идет голосование за реванш теми же героями...';
+
+    this.rematchInterval = setInterval(() => {
+      left--;
+      if (timerVal) timerVal.textContent = left;
+      if (left <= 0) {
+        clearInterval(this.rematchInterval);
+        // Время вышло — возвращаем всех в комнату
+        if (network.isHost) {
+          network.sendNetworkAction({ type: 'HOST_RETURN_TO_ROOM' });
+        }
+        this.handleReturnToRoom();
+      }
+    }, 1000);
+  }
+
+  handlePlayerAcceptRematch() {
+    const mySlot = network.mySlotIndex || 0;
+    const promptBox = document.getElementById('rematchPromptBox');
+    const statusBox = document.getElementById('rematchStatusBox');
+
+    if (promptBox) promptBox.style.display = 'none';
+    if (statusBox) statusBox.textContent = 'Вы согласились на реванш! Ожидаем остальных...';
+
+    if (network.isHost) {
+      this.handleRematchResponse(mySlot, true);
+    } else {
+      network.sendNetworkAction({
+        type: 'REMATCH_RESPONSE',
+        slotIndex: mySlot,
+        accepted: true
+      });
+    }
+  }
+
+  handlePlayerDeclineRematch() {
+    const mySlot = network.mySlotIndex || 0;
+    clearInterval(this.rematchInterval);
+
+    if (network.isHost) {
+      this.handleReturnToRoom();
+    } else {
+      network.sendNetworkAction({
+        type: 'REMATCH_RESPONSE',
+        slotIndex: mySlot,
+        accepted: false
+      });
+      // Отказавшийся игрок выходит в главное меню
+      const modal = document.getElementById('gameOverModal');
+      if (modal) modal.classList.remove('active');
+      this.switchScreen('mainMenu');
+    }
+  }
+
+  handleRematchResponse(slotIndex, accepted) {
+    if (!network.isHost) return;
+    if (!this.rematchResponses) this.rematchResponses = {};
+
+    if (!accepted) {
+      // Игрок отказался!
+      this.logCombat(`Игрок вышел из реванша. Возврат оставшихся в комнату.`, 'system');
+      clearInterval(this.rematchInterval);
+      network.sendNetworkAction({ type: 'HOST_RETURN_TO_ROOM' });
+      this.handleReturnToRoom();
+      return;
+    }
+
+    this.rematchResponses[slotIndex] = true;
+
+    // Проверяем: все ли подключенные клиенты согласились?
+    const connectedSlots = network.roomState.slots
+      .filter((s, idx) => idx < this.playerCount && s.isConnected);
+
+    const allAccepted = connectedSlots.every(s => this.rematchResponses[s.slot]);
+
+    if (allAccepted) {
+      clearInterval(this.rematchInterval);
+      const newSeed = Math.floor(Math.random() * 1000000);
+      network.sendNetworkAction({
+        type: 'REMATCH_START',
+        mapSeed: newSeed
+      });
+      this.startRematchBattle(newSeed);
+    }
+  }
+
+  startRematchBattle(seed) {
+    clearInterval(this.rematchInterval);
+    const modal = document.getElementById('gameOverModal');
+    if (modal) modal.classList.remove('active');
+    this.startBattle(false, seed);
   }
 
   // ==========================================================================
@@ -1477,9 +1771,9 @@ class SnowballGame {
       tooltip.style.top = `${e.clientY + 14}px`;
 
       let terrainName = 'Чистый снег';
-      if (tile.isHill) terrainName = '⛰️ Снежный холм (+1 к прицелу)';
-      if (tile.isSnowdrift) terrainName = '🌨️ Глубокий сугроб';
-      if (tile.isObstacle) terrainName = '🌲 Снежная ель (препятствие)';
+      if (tile.isHill) terrainName = '⛰️ Снежный холм (+1 к броску кубика при атаке / по себе)';
+      if (tile.isSnowdrift) terrainName = '🌨️ Глубокий сугроб (+2 к кубику по цели, -1 шаг в след. ход)';
+      if (tile.isObstacle) terrainName = '🌲 Снежная ель (укрытие: +3 к кубику сквозь дерево)';
       if (tile.terrain === 'ice') terrainName = '⛸️ Скользкий лед';
 
       let text = `<strong>Гекс (${hex.q}, ${hex.r})</strong><br>${terrainName}`;
@@ -1929,10 +2223,24 @@ class SnowballGame {
 
   updateHandDisplay() {
     const player = this.players[this.currentPlayerIndex];
+    const handWrapper = document.getElementById('playerHandContainer');
     const container = document.getElementById('cardsCarousel');
     const countBadge = document.getElementById('handCount');
 
     if (!player) return;
+
+    // Во время игры никто не знает, какие снежки у других игроков:
+    // если сейчас чужой ход (remote player или bot в мультиплеере/одиночной), скрываем панель со снежками!
+    const mySlot = this.gameType === 'multiplayer' ? network.mySlotIndex : 0;
+    const isMyTurn = (this.currentPlayerIndex === mySlot) && !player.isBot;
+
+    if (this.gameType === 'multiplayer' && !isMyTurn) {
+      if (handWrapper) handWrapper.style.display = 'none';
+      return;
+    } else {
+      if (handWrapper) handWrapper.style.display = 'flex';
+    }
+
     countBadge.textContent = player.hand.length;
     container.innerHTML = '';
 
