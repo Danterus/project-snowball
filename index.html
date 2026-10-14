@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Project Snowball - Скирмиш Варгейм</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@400;700;900&family=Nunito:wght@600;800;900&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Фоновый снегопад -->
+  <canvas id="snowCanvas" class="snow-overlay"></canvas>
+
+  <div id="app">
+    <!-- ============================================== -->
+    <!-- ГЛАВНОЕ МЕНЮ -->
+    <!-- ============================================== -->
+    <section id="mainMenu" class="screen active">
+      <div class="menu-container">
+        <div class="game-logo-wrapper">
+          <div class="logo-snowball-icon">
+            <svg viewBox="0 0 100 100" class="logo-svg">
+              <defs>
+                <radialGradient id="snowGrad" cx="35%" cy="35%" r="65%">
+                  <stop offset="0%" stop-color="#ffffff"/>
+                  <stop offset="60%" stop-color="#d6edff"/>
+                  <stop offset="100%" stop-color="#9ac9f5"/>
+                </radialGradient>
+                <filter id="snowShadow" x="-20%" y="-20%" width="140%" height="140%">
+                  <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="rgba(15, 35, 75, 0.4)"/>
+                </filter>
+              </defs>
+              <circle cx="50" cy="50" r="42" fill="url(#snowGrad)" filter="url(#snowShadow)"/>
+              <circle cx="36" cy="36" r="10" fill="#ffffff" opacity="0.8"/>
+              <path d="M25 65 Q 50 82 75 65" stroke="#7eb5e6" stroke-width="4" fill="none" stroke-linecap="round"/>
+              <circle cx="36" cy="48" r="5" fill="#305a80"/>
+              <circle cx="64" cy="48" r="5" fill="#305a80"/>
+              <!-- Румянец -->
+              <ellipse cx="28" cy="56" rx="6" ry="3" fill="#ff9ebb" opacity="0.6"/>
+              <ellipse cx="72" cy="56" rx="6" ry="3" fill="#ff9ebb" opacity="0.6"/>
+              <!-- Вязаная зимняя шапочка -->
+              <path d="M20 38 Q 50 10 80 38 Z" fill="#e74c3c"/>
+              <path d="M16 38 Q 50 28 84 38 L 84 44 Q 50 34 16 44 Z" fill="#f1c40f"/>
+              <circle cx="50" cy="12" r="7" fill="#ffffff"/>
+            </svg>
+          </div>
+          <h1 class="game-title">PROJECT <span>SNOWBALL</span></h1>
+          <p class="game-subtitle">Тактический снежный скирмиш-варгейм во дворе</p>
+        </div>
+
+        <div class="menu-card">
+          <div class="menu-section-title">
+            <span class="icon">❄️</span> Выберите режим игры
+          </div>
+
+          <div class="mode-select-grid">
+            <button class="mode-card active" data-mode="ffa">
+              <div class="mode-badge">Доступен</div>
+              <div class="mode-icon">⚔️</div>
+              <div class="mode-name">FFA: Каждый сам за себя</div>
+              <div class="mode-desc">Классическая снежная битва! Победит последний выживший во дворе.</div>
+            </button>
+
+            <button class="mode-card disabled" title="Скоро в обновлении!">
+              <div class="mode-badge lock">В разработке</div>
+              <div class="mode-icon">👥</div>
+              <div class="mode-name">Командный бой 2х2</div>
+              <div class="mode-desc">Снежная стенка на стенку. Прикрывайте друзей и атакуйте строем.</div>
+            </button>
+
+            <button class="mode-card disabled" title="Скоро в обновлении!">
+              <div class="mode-badge lock">В разработке</div>
+              <div class="mode-icon">🚩</div>
+              <div class="mode-name">Царь снежной горы</div>
+              <div class="mode-desc">Захватите центральный холм и удерживайте его под градом снежков!</div>
+            </button>
+          </div>
+
+          <div class="menu-actions">
+            <button id="btnQuickPlay" class="btn btn-primary btn-glow">
+              <span class="btn-icon">🎮</span> Одиночная игра (против ботов)
+            </button>
+            <button id="btnHotseat" class="btn btn-secondary">
+              <span class="btn-icon">🛋️</span> Локальная игра (Hotseat)
+            </button>
+            <button id="btnMultiplayer" class="btn btn-secondary btn-multiplayer">
+              <span class="btn-icon">🌐</span> Сетевая комната (P2P / Онлайн)
+            </button>
+            <button id="btnRules" class="btn btn-outline">
+              <span class="btn-icon">📖</span> Правила игры и снежков
+            </button>
+          </div>
+        </div>
+
+        <div class="menu-footer">
+          <div class="sound-toggle-btn" id="btnToggleSound" title="Звук Вкл/Выкл">
+            <span id="soundIcon">🔊</span> Звуки и эффекты
+          </div>
+          <div class="version-tag">Версия Прототипа v1.0 • 7 Зон холмов</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================== -->
+    <!-- ЭКРАН СЕТЕВОЙ КОМНАТЫ / ЛОББИ -->
+    <!-- ============================================== -->
+    <section id="multiplayerLobbyScreen" class="screen">
+      <div class="modal-dialog lobby-dialog">
+        <div class="modal-header">
+          <h2>🌐 Мультиплеерная комната</h2>
+          <button class="btn-close" id="btnCloseMultiplayer">✕</button>
+        </div>
+
+        <div class="modal-body lobby-body">
+          <div class="room-setup-tabs">
+            <button class="tab-btn active" id="tabCreateRoom">Создать новую комнату</button>
+            <button class="tab-btn" id="tabJoinRoom">Присоединиться по коду</button>
+          </div>
+
+          <!-- Вкладка: Создание -->
+          <div id="panelCreateRoom" class="room-panel active">
+            <div class="room-code-box">
+              <div class="room-label">Код вашей комнаты:</div>
+              <div class="room-code-display">
+                <span id="generatedRoomCode">SNOW-7749</span>
+                <button class="btn-copy" id="btnCopyRoomCode" title="Скопировать код">📋</button>
+              </div>
+              <p class="hint">Отправьте этот код друзьям или откройте вторую вкладку браузера для теста мультиплеера.</p>
+            </div>
+
+            <div class="room-config">
+              <label>Количество игроков в комнате:</label>
+              <div class="player-count-buttons">
+                <button class="btn-chip" data-count="2">2 Игрока</button>
+                <button class="btn-chip active" data-count="3">3 Игрока</button>
+                <button class="btn-chip" data-count="4">4 Игрока</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Вкладка: Вход -->
+          <div id="panelJoinRoom" class="room-panel">
+            <div class="join-input-group">
+              <label for="inputJoinCode">Введите код комнаты друга:</label>
+              <input type="text" id="inputJoinCode" placeholder="например: SNOW-7749" maxlength="15">
+              <button id="btnConnectRoom" class="btn btn-secondary">Подключиться к комнате</button>
+            </div>
+          </div>
+
+          <!-- Список слотов комнаты -->
+          <div class="lobby-slots">
+            <h3>Участники в комнате:</h3>
+            <div class="slots-container" id="slotsContainer">
+              <!-- Слоты генерируются динамически -->
+            </div>
+          </div>
+
+          <div class="lobby-actions">
+            <button id="btnStartMultiplayerGame" class="btn btn-primary btn-large">
+              🚀 Начать битву снежками!
+            </button>
+            <button id="btnCancelMultiplayer" class="btn btn-outline">
+              Назад в меню
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================== -->
+    <!-- ЭКРАН ВЫБОРА ПЕРСОНАЖЕЙ (LOBBY / SETUP) -->
+    <!-- ============================================== -->
+    <section id="characterSelectScreen" class="screen">
+      <div class="setup-container">
+        <div class="setup-header">
+          <button class="btn btn-outline btn-back" id="btnBackToMenu">← В меню</button>
+          <div class="setup-title-box">
+            <h2 id="setupHeading">Подготовка к снежному бою</h2>
+            <p id="setupSubheading">Выберите своего заводилу и соперников во дворе</p>
+          </div>
+          <div class="player-count-select">
+            <span>Игроков:</span>
+            <button class="btn-count" data-players="2">2</button>
+            <button class="btn-count active" data-players="3">3</button>
+            <button class="btn-count" data-players="4">4</button>
+          </div>
+        </div>
+
+        <!-- Контейнер карточек слотов игроков -->
+        <div class="player-slots-grid" id="playerSlotsGrid">
+          <!-- Генерируется из JS -->
+        </div>
+
+        <!-- Галерея выбора персонажа -->
+        <div class="character-roster-box">
+          <div class="roster-title">
+            <span>Доступные ребята со двора:</span>
+            <small>Нажмите на карточку персонажа для выбранного слота</small>
+          </div>
+          <div class="character-roster" id="rosterContainer">
+            <!-- Генерируется из JS -->
+          </div>
+        </div>
+
+        <div class="setup-bottom-bar">
+          <div class="map-preview-hint">
+            <span class="icon">🗺️</span> Карта: <strong>7 Гексагональных зон</strong> с холмом в центре и случайным вращением
+          </div>
+          <button id="btnLaunchBattle" class="btn btn-primary btn-large btn-glow">
+            ❄️ НАЧАТЬ СНЕЖНУЮ БИТВУ!
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================== -->
+    <!-- ИГРОВОЙ ЭКРАН (BATTLEFIELD) -->
+    <!-- ============================================== -->
+    <section id="gameScreen" class="screen">
+      <!-- Верхняя панель инфо -->
+      <header class="game-hud-top">
+        <div class="hud-left">
+          <button id="btnMenuInGame" class="btn-hud" title="Меню">⚙️</button>
+          <div class="turn-indicator" id="turnIndicator">
+            <div class="turn-avatar" id="currentTurnAvatar"></div>
+            <div class="turn-text">
+              <div class="turn-title" id="currentTurnName">Ход: Ваня</div>
+              <div class="turn-phase" id="currentTurnPhase">Фаза: Движение</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="hud-center">
+          <div class="round-counter" id="roundCounter">Раунд 1</div>
+          <div class="mode-tag">Режим: FFA (Сам за себя)</div>
+        </div>
+
+        <div class="hud-right">
+          <button id="btnCenterCamera" class="btn-hud" title="Центрировать камеру">🎯 Центр</button>
+          <button id="btnZoomIn" class="btn-hud" title="Приблизить">+</button>
+          <button id="btnZoomOut" class="btn-hud" title="Отдалить">-</button>
+          <button id="btnRulesInGame" class="btn-hud" title="Справка">❓</button>
+        </div>
+      </header>
+
+      <!-- Основная область с полем битвы -->
+      <div class="battlefield-wrapper" id="battlefieldWrapper">
+        <canvas id="gameCanvas"></canvas>
+
+        <!-- Всплывающие подсказки клеток/целей -->
+        <div id="hexTooltip" class="hex-tooltip"></div>
+
+        <!-- 3D Анимация броска кубика -->
+        <div id="diceOverlay" class="dice-overlay">
+          <div class="dice-modal">
+            <div class="dice-header" id="diceHeader">МЕТАНИЕ СНЕЖКА!</div>
+            <div class="dice-calculation" id="diceCalculation">
+              Расчет кубика попадания...
+            </div>
+            
+            <div class="dice-stage">
+              <div class="dice-3d" id="diceCube">
+                <div class="dice-face face-1"><span></span></div>
+                <div class="dice-face face-2"><span></span><span></span></div>
+                <div class="dice-face face-3"><span></span><span></span><span></span></div>
+                <div class="dice-face face-4"><span></span><span></span><span></span><span></span></div>
+                <div class="dice-face face-5"><span></span><span></span><span></span><span></span><span></span></div>
+                <div class="dice-face face-6"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+              </div>
+            </div>
+
+            <div class="dice-result-msg" id="diceResultMsg">Катим кубик...</div>
+            <button id="diceCloseBtn" class="btn btn-primary" style="display: none;">Продолжить</button>
+          </div>
+        </div>
+
+        <!-- Сообщение о победе / окончании игры -->
+        <div id="gameOverModal" class="game-over-modal">
+          <div class="game-over-card">
+            <div class="trophy-icon">🏆❄️</div>
+            <h2 id="winnerTitle">ПОБЕДИТЕЛЬ!</h2>
+            <div class="winner-character-preview" id="winnerPreview"></div>
+            <p id="winnerSubtitle">Остался единственным непобежденным снежным королем двора!</p>
+            <div class="game-over-actions">
+              <button id="btnPlayAgain" class="btn btn-primary btn-glow">Сыграть ещё раз</button>
+              <button id="btnExitToMenu" class="btn btn-outline">Выйти в главное меню</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Боковая панель: Список игроков и Лог событий -->
+      <aside class="sidebar-hud">
+        <div class="players-status-list" id="playersStatusList">
+          <!-- Статусы игроков генерируются динамически -->
+        </div>
+
+        <div class="combat-log-container">
+          <div class="combat-log-title">
+            <span>📜 Снежная летопись</span>
+            <button id="btnClearLog" title="Очистить лог">🧹</button>
+          </div>
+          <div class="combat-log" id="combatLog">
+            <div class="log-entry system">Битва началась! 7 зон покрыты чистым снегом.</div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Нижняя панель действий игрока -->
+      <footer class="game-hud-bottom">
+        <!-- Информация о текущем ходе и доступных очках движения -->
+        <div class="action-status-bar">
+          <div class="move-points-badge" id="movePointsBadge">
+            <span class="icon">👟</span> Ходов осталось: <strong id="movePointsVal">4</strong>
+          </div>
+          <div class="instruction-banner" id="instructionBanner">
+            Выберите клетку для перемещения или используйте действие ниже
+          </div>
+        </div>
+
+        <!-- Кнопки действий -->
+        <div class="action-buttons-group">
+          <button id="btnActionGather" class="action-btn" title="Слепить снежок из сугроба">
+            <span class="action-icon">🧤</span>
+            <span class="action-label">Собрать снежок</span>
+            <small>Получить карту снежка</small>
+          </button>
+
+          <button id="btnActionThrow" class="action-btn" title="Выбрать снежок и бросить в соперника">
+            <span class="action-icon">🎯</span>
+            <span class="action-label" id="lblActionThrow">Метнуть снежок</span>
+            <small id="subActionThrow">Бросок по цели с кубиком</small>
+          </button>
+
+          <button id="btnActionCancelAim" class="action-btn btn-cancel-aim" id="btnActionCancelAim" style="display: none;" title="Отменить бросок и вернуться к движению">
+            <span class="action-icon">↩️</span>
+            <span class="action-label">Отмена / Шаг</span>
+            <small>Вернуться к движению</small>
+          </button>
+
+          <button id="btnActionSkip" class="action-btn btn-skip" title="Завершить текущий ход">
+            <span class="action-icon">⏭️</span>
+            <span class="action-label">Пропустить / Конец хода</span>
+            <small>Передать ход дальше</small>
+          </button>
+        </div>
+
+        <!-- Карты снежков на руках у игрока -->
+        <div class="player-hand-container">
+          <div class="hand-header">
+            <span>🧤 Ваши снежки на руках (<span id="handCount">0</span>/4):</span>
+            <small id="handHint">Нажмите на снежок для броска</small>
+          </div>
+          <div class="cards-carousel" id="cardsCarousel">
+            <!-- Карты снежков генерируются тут -->
+          </div>
+        </div>
+      </footer>
+    </section>
+
+    <!-- ============================================== -->
+    <!-- МОДАЛЬНОЕ ОКНО ПРАВИЛ И СПРАВКИ -->
+    <!-- ============================================== -->
+    <div id="rulesModal" class="modal-backdrop">
+      <div class="modal-dialog rules-dialog">
+        <div class="modal-header">
+          <h2>📖 Правила игры "Project Snowball"</h2>
+          <button class="btn-close" id="btnCloseRules">✕</button>
+        </div>
+        <div class="modal-body rules-body">
+          <div class="rule-block">
+            <h3>🎯 Цель игры</h3>
+            <p>Режим <strong>FFA (Каждый сам за себя)</strong>: побеждает последний оставшийся ребенок на ногах. Пораженные участники падают в сугроб и делают снежных ангелов!</p>
+          </div>
+
+          <div class="rule-block">
+            <h3>🗺️ Игровое поле: 7 Зон холмов</h3>
+            <p>Поле состоит из <strong>7 шестиугольных зон</strong> (1 центральная и 6 окружающих). Центральная зона всегда содержит <strong>Холм в центре</strong>, дающий тактическое преимущество (+1 к дальности прицела). Все 6 окружающих зон при старте игры случайно поворачиваются вокруг своей оси, создавая уникальную карту каждый раз!</p>
+          </div>
+
+          <div class="rule-block">
+            <h3>⏳ Как проходит ход</h3>
+            <ol>
+              <li><strong>Движение:</strong> Игрок может сделать до <strong>X шагов</strong> (где X — Скорость персонажа). Сугробы дают укрытие, а деревья блокируют путь.</li>
+              <li><strong>Действие (на выбор одно):</strong>
+                <ul>
+                  <li><strong>Собрать снежок:</strong> Взять в руку случайную карту снежка (обычный, тяжелый, легкий или спец-снежок).</li>
+                  <li><strong>Метнуть снежок:</strong> Выбрать снежок из руки, кликнуть по цели и кинуть шестигранный кубик D6.</li>
+                  <li><strong>Пропустить:</strong> Завершить ход.</li>
+                </ul>
+              </li>
+            </ol>
+          </div>
+
+          <div class="rule-block">
+            <h3>🎲 Новая механика попадания кубиком D6</h3>
+            <p>Условие попадания зависит от прицельной дальности героя:</p>
+            <div class="formula-box">
+              <ul>
+                <li><strong>Дистанция &le; 1/2 дальности прицела</strong> (округление вниз): нужно выбросить <strong>2+</strong>.</li>
+                <li><strong>Дистанция от 1/2 до максимального прицела</strong>: нужно выбросить <strong>4+</strong>.</li>
+                <li><strong>Свыше максимальной дальности</strong>: за каждую дополнительную клетку <strong>+1 к сложности</strong> (5+, 6+ и т.д.).</li>
+                <li><strong>Бонус снежка:</strong> легкий снежок добавляет <strong>+2 к результату броска кубика</strong>, тяжелый <strong>-1 к результату</strong>.</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="rule-block">
+            <h3>❄️ Виды снежков</h3>
+            <div class="snowball-types-preview">
+              <div class="preview-card">
+                <strong>⚪ Обычный</strong>
+                <p>Базовый урон, стандартная дальность. Надежный выбор.</p>
+              </div>
+              <div class="preview-card">
+                <strong>🪨 Тяжелый</strong>
+                <p>Увеличенный урон (+2 HP), но штраф кубика (-1 к броску).</p>
+              </div>
+              <div class="preview-card">
+                <strong>⚡ Легкий</strong>
+                <p>Бонус кубика (+2 к броску), летит быстро и метко!</p>
+              </div>
+              <div class="preview-card">
+                <strong>🧊 Ледяной осколок</strong>
+                <p>Эффект: Замораживает соперника, отнимая 2 очка движения в следующий ход.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Аудио синтезатор и игровая логика -->
+  <!-- PeerJS для бесплатного WebRTC P2P мультиплеера через интернет -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script src="audio.js"></script>
+  <script src="data.js"></script>
+  <script src="hexgrid.js"></script>
+  <script src="multiplayer.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
