@@ -221,9 +221,9 @@ class SnowballGame {
       this.gameType = 'multiplayer';
       this.playerCount = network.roomState.playerCount;
 
-      // Хост отправляет команду старта игры
+      // Хост отправляет команду перехода на выбор персонажа
       network.sendNetworkAction({
-        type: 'GAME_START',
+        type: 'GO_TO_CHAR_SELECT',
         playerCount: this.playerCount
       });
 
@@ -271,18 +271,32 @@ class SnowballGame {
       });
     });
 
-    // Слушатель игровых сетевых событий (GAME_START и т.д.)
+    // Слушатель игровых сетевых событий
     network.onMessage((msg) => {
-      if (msg.type === 'GAME_START') {
+      if (msg.type === 'GO_TO_CHAR_SELECT') {
         this.gameType = 'multiplayer';
         this.playerCount = msg.playerCount || 3;
         this.openCharacterSelect();
+      } else if (msg.type === 'CHAR_SELECTED_SYNC') {
+        // Синхронизация выбора персонажа другим игроком
+        if (this.configuredSlots[msg.slotIndex]) {
+          const char = CHARACTERS.find(c => c.id === msg.characterId);
+          if (char) {
+            this.configuredSlots[msg.slotIndex].character = char;
+            this.configuredSlots[msg.slotIndex].confirmed = !!msg.confirmed;
+            this.renderPlayerSlots();
+            this.updateRosterSelection();
+          }
+        }
+      } else if (msg.type === 'START_BATTLE_SYNC') {
+        this.startBattle(false);
       }
     });
 
     // Экран выбора персонажей
     document.getElementById('btnBackToMenu').addEventListener('click', () => {
       sounds.playClick();
+      clearInterval(this.charSelectTimerInterval);
       this.switchScreen('mainMenu');
     });
 
@@ -298,7 +312,11 @@ class SnowballGame {
 
     document.getElementById('btnLaunchBattle').addEventListener('click', () => {
       sounds.playClick();
-      this.startBattle();
+      if (this.gameType === 'multiplayer') {
+        this.confirmMyCharacterSelection();
+      } else {
+        this.startBattle();
+      }
     });
 
     // Управление внутри боя
@@ -317,6 +335,7 @@ class SnowballGame {
 
     document.getElementById('btnMenuInGame').addEventListener('click', () => {
       if (confirm('Выйти в главное меню? Текущий бой будет завершен.')) {
+        clearInterval(this.charSelectTimerInterval);
         this.switchScreen('mainMenu');
       }
     });
@@ -452,10 +471,10 @@ class SnowballGame {
   setupCharacterSelect() {
     this.selectedSlotIndex = 0;
     this.configuredSlots = [
-      { character: CHARACTERS[0], isBot: false },
-      { character: CHARACTERS[1], isBot: true },
-      { character: CHARACTERS[2], isBot: true },
-      { character: CHARACTERS[3], isBot: true }
+      { character: CHARACTERS[0], isBot: false, confirmed: false, name: 'Игрок 1' },
+      { character: CHARACTERS[1], isBot: true, confirmed: false, name: 'Игрок 2' },
+      { character: CHARACTERS[2], isBot: true, confirmed: false, name: 'Игрок 3' },
+      { character: CHARACTERS[3], isBot: true, confirmed: false, name: 'Игрок 4' }
     ];
 
     // Отрисовка списка персонажей в ростере
@@ -464,6 +483,7 @@ class SnowballGame {
     CHARACTERS.forEach((char) => {
       const card = document.createElement('div');
       card.className = 'roster-card';
+      card.dataset.charId = char.id;
       card.innerHTML = `
         <div class="roster-art">${char.art}</div>
         <div class="roster-name">${char.name}</div>
@@ -477,10 +497,29 @@ class SnowballGame {
       `;
 
       card.addEventListener('click', () => {
+        // Проверяем, не занят ли персонаж другим слотом
+        const isTakenByOther = this.configuredSlots.slice(0, this.playerCount).some(
+          (s, idx) => idx !== this.selectedSlotIndex && s.character.id === char.id
+        );
+        if (isTakenByOther) {
+          alert('Этот персонаж уже занят другим игроком! Выберите другого героя.');
+          return;
+        }
+
         sounds.playClick();
         this.configuredSlots[this.selectedSlotIndex].character = char;
         this.renderPlayerSlots();
         this.updateRosterSelection();
+
+        // Если это мультиплеер, синхронизируем выбор персонажа по сети
+        if (this.gameType === 'multiplayer') {
+          network.sendNetworkAction({
+            type: 'CHAR_SELECTED_SYNC',
+            slotIndex: this.selectedSlotIndex,
+            characterId: char.id,
+            confirmed: this.configuredSlots[this.selectedSlotIndex].confirmed
+          });
+        }
       });
 
       roster.appendChild(card);
@@ -488,25 +527,116 @@ class SnowballGame {
   }
 
   openCharacterSelect() {
+    clearInterval(this.charSelectTimerInterval);
+
+    // Скрываем переключатель количества игроков в мультиплеере (оно уже зафиксировано в лобби)
+    const countSelectEl = document.querySelector('.player-count-select');
+    if (countSelectEl) {
+      countSelectEl.style.display = this.gameType === 'multiplayer' ? 'none' : 'flex';
+    }
+
     if (this.gameType === 'hotseat') {
-      this.configuredSlots.forEach((slot) => (slot.isBot = false));
+      this.configuredSlots.forEach((slot, idx) => {
+        slot.isBot = false;
+        slot.name = `Игрок ${idx + 1}`;
+        slot.character = CHARACTERS[idx % CHARACTERS.length];
+        slot.confirmed = false;
+      });
       document.getElementById('setupHeading').textContent = 'Локальная битва (Hotseat)';
       document.getElementById('setupSubheading').textContent = 'Каждый игрок управляет своим героем по очереди на одном экране';
+      document.getElementById('btnLaunchBattle').textContent = '❄️ НАЧАТЬ СНЕЖНУЮ БИТВУ!';
+      document.getElementById('charSelectTimerBox').style.display = 'none';
     } else if (this.gameType === 'bot') {
       this.configuredSlots[0].isBot = false;
+      this.configuredSlots[0].name = 'Вы';
+      this.configuredSlots[0].character = CHARACTERS[0];
       for (let i = 1; i < this.configuredSlots.length; i++) {
         this.configuredSlots[i].isBot = true;
+        this.configuredSlots[i].name = `Бот ${i}`;
+        this.configuredSlots[i].character = CHARACTERS[i % CHARACTERS.length];
       }
       document.getElementById('setupHeading').textContent = 'Одиночная битва против дворовых ребят';
       document.getElementById('setupSubheading').textContent = 'Вы управляете Слотом 1, остальные персонажи управляются ИИ';
+      document.getElementById('btnLaunchBattle').textContent = '❄️ НАЧАТЬ СНЕЖНУЮ БИТВУ!';
+      document.getElementById('charSelectTimerBox').style.display = 'none';
     } else {
-      document.getElementById('setupHeading').textContent = 'Сетевая комната';
-      document.getElementById('setupSubheading').textContent = 'Настройка состава участников для матча';
+      // МУЛЬТИПЛЕЕР
+      const mySlot = network.mySlotIndex || 0;
+      this.selectedSlotIndex = mySlot;
+
+      // Применяем слоты из сети
+      network.roomState.slots.forEach((s, idx) => {
+        if (this.configuredSlots[idx]) {
+          this.configuredSlots[idx].name = s.name;
+          this.configuredSlots[idx].isBot = !s.isConnected;
+          this.configuredSlots[idx].character = CHARACTERS[idx % CHARACTERS.length];
+          this.configuredSlots[idx].confirmed = false;
+        }
+      });
+
+      document.getElementById('setupHeading').textContent = `Выбор персонажа: ${network.playerName}`;
+      document.getElementById('setupSubheading').textContent = `Ваш слот: Игрок ${mySlot + 1}. Выберите уникального героя со двора!`;
+      document.getElementById('btnLaunchBattle').textContent = '✅ ПОДТВЕРДИТЬ ВЫБОР';
+      document.getElementById('charSelectTimerBox').style.display = 'block';
+
+      // Запускаем таймер 20 секунд
+      this.startCharSelectCountdown(20);
     }
 
     this.renderPlayerSlots();
     this.updateRosterSelection();
     this.switchScreen('characterSelectScreen');
+  }
+
+  // 20-секундный таймер выбора персонажа
+  startCharSelectCountdown(seconds = 20) {
+    this.charSelectSecondsLeft = seconds;
+    const timerVal = document.getElementById('charSelectTimerVal');
+    if (timerVal) timerVal.textContent = this.charSelectSecondsLeft;
+
+    this.charSelectTimerInterval = setInterval(() => {
+      this.charSelectSecondsLeft--;
+      if (timerVal) timerVal.textContent = this.charSelectSecondsLeft;
+
+      if (this.charSelectSecondsLeft <= 0) {
+        clearInterval(this.charSelectTimerInterval);
+        // Время вышло — автоматически подтверждаем и стартуем
+        if (this.gameType === 'multiplayer' && network.isHost) {
+          network.sendNetworkAction({ type: 'START_BATTLE_SYNC' });
+          this.startBattle(true);
+        } else if (this.gameType !== 'multiplayer') {
+          this.startBattle();
+        }
+      }
+    }, 1000);
+  }
+
+  // Подтверждение выбора персонажа в мультиплеере
+  confirmMyCharacterSelection() {
+    const mySlot = network.mySlotIndex || 0;
+    this.configuredSlots[mySlot].confirmed = true;
+    document.getElementById('btnLaunchBattle').textContent = '✅ ВЫБОР ПОДТВЕРЖДЕН!';
+    document.getElementById('btnLaunchBattle').disabled = true;
+
+    // Синхронизируем подтверждение
+    network.sendNetworkAction({
+      type: 'CHAR_SELECTED_SYNC',
+      slotIndex: mySlot,
+      characterId: this.configuredSlots[mySlot].character.id,
+      confirmed: true
+    });
+
+    this.renderPlayerSlots();
+
+    // Проверяем: подтвердили ли все слоты?
+    const activeSlots = this.configuredSlots.slice(0, this.playerCount);
+    const allConfirmed = activeSlots.every(s => s.confirmed || s.isBot);
+
+    if (allConfirmed && network.isHost) {
+      clearInterval(this.charSelectTimerInterval);
+      network.sendNetworkAction({ type: 'START_BATTLE_SYNC' });
+      this.startBattle(true);
+    }
   }
 
   renderPlayerSlots() {
@@ -516,13 +646,14 @@ class SnowballGame {
     for (let i = 0; i < this.playerCount; i++) {
       const slot = this.configuredSlots[i];
       const char = slot.character;
+      const isMySlot = this.gameType === 'multiplayer' ? (i === network.mySlotIndex) : true;
 
       const card = document.createElement('div');
       card.className = `player-slot-card ${i === this.selectedSlotIndex ? 'active-slot' : ''}`;
       card.innerHTML = `
         <div class="slot-header">
-          <span class="slot-label">Игрок ${i + 1}</span>
-          <span class="slot-badge-type ${slot.isBot ? 'bot' : 'human'}">${slot.isBot ? '🤖 ИИ Бот' : '👤 Игрок'}</span>
+          <span class="slot-label">${slot.name || ('Игрок ' + (i + 1))} ${slot.confirmed ? '✅' : ''}</span>
+          <span class="slot-badge-type ${slot.isBot ? 'bot' : 'human'}">${slot.isBot ? '🤖 ИИ Бот' : (isMySlot ? '👤 ВЫ' : '🌐 Игрок')}</span>
         </div>
         <div class="slot-char-preview">
           <div class="slot-avatar" style="border-color: ${char.color};">${char.art}</div>
@@ -539,6 +670,10 @@ class SnowballGame {
       `;
 
       card.addEventListener('click', () => {
+        // В мультиплеере игрок может переключать только свой собственный слот
+        if (this.gameType === 'multiplayer' && i !== network.mySlotIndex) {
+          return;
+        }
         sounds.playClick();
         this.selectedSlotIndex = i;
         this.renderPlayerSlots();
@@ -550,21 +685,30 @@ class SnowballGame {
   }
 
   updateRosterSelection() {
-    const currentSelectedChar = this.configuredSlots[this.selectedSlotIndex].character;
+    const currentSelectedChar = this.configuredSlots[this.selectedSlotIndex]?.character;
     const cards = document.querySelectorAll('.roster-card');
+
+    // Находим всех персонажей, уже занятых другими слотами
+    const takenIds = this.configuredSlots
+      .slice(0, this.playerCount)
+      .filter((s, idx) => idx !== this.selectedSlotIndex)
+      .map(s => s.character.id);
+
     cards.forEach((card, idx) => {
-      if (CHARACTERS[idx].id === currentSelectedChar.id) {
-        card.classList.add('selected');
-      } else {
-        card.classList.remove('selected');
-      }
+      const charId = CHARACTERS[idx].id;
+      const isSelected = currentSelectedChar && charId === currentSelectedChar.id;
+      const isTaken = takenIds.includes(charId);
+
+      card.classList.toggle('selected', isSelected);
+      card.classList.toggle('taken', isTaken);
     });
   }
 
   // ==========================================================================
   // СТАРТ БИТВЫ И РАССТАНОВКА НА КАРТЕ
   // ==========================================================================
-  startBattle() {
+  startBattle(isSyncInitiator = true) {
+    clearInterval(this.charSelectTimerInterval);
     this.map = MapGenerator.generateMap();
 
     // 2. Инициализируем игроков
@@ -584,7 +728,7 @@ class SnowballGame {
 
       this.players.push({
         id: i,
-        name: char.name,
+        name: slot.name || char.name,
         art: char.art,
         color: char.color,
         isBot: slot.isBot,

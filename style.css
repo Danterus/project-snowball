@@ -849,10 +849,20 @@ body, html {
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.3);
 }
 
-.roster-card.selected {
-  border-color: #ffd54f;
-  background: rgba(255, 213, 79, 0.15);
-  box-shadow: 0 0 12px rgba(255, 213, 79, 0.4);
+.roster-card.taken {
+  opacity: 0.35;
+  filter: grayscale(0.8);
+  cursor: not-allowed;
+  pointer-events: none;
+  border-color: rgba(255, 255, 255, 0.05);
+}
+
+.roster-card.taken::after {
+  content: 'Занят';
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #ff5252;
+  margin-top: 4px;
 }
 
 .roster-art {
