@@ -270,6 +270,22 @@ class MultiplayerManager {
     }
   }
 
+  // Отправка любого сетевого события/действия
+  sendNetworkAction(payload) {
+    const data = {
+      ...payload,
+      roomCode: this.roomCode,
+      senderId: this.myPlayerId,
+      timestamp: Date.now()
+    };
+
+    if (this.isHost) {
+      this.broadcastFromHost(data);
+    } else if (this.hostConnection && this.hostConnection.open) {
+      this.hostConnection.send(data);
+    }
+  }
+
   broadcastFromHost(data, exceptConn = null) {
     this.connections.forEach(conn => {
       if (conn !== exceptConn && conn.open) {
